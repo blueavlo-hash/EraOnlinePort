@@ -38,3 +38,7 @@ launcher/downloads/
 launcher/installed/
 launcher/release/
 launcher/state.json
+
+# .NET build output
+**/bin/
+**/obj/

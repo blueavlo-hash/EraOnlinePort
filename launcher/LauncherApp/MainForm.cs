@@ -214,7 +214,6 @@ public sealed class MainForm : Form
         for (var i = 0; i < totalParts; i++)
         {
             var partUrl = parts[i];
-            var partName = Path.GetFileName(new Uri(partUrl).AbsolutePath);
             SetStatus($"Downloading part {i + 1} of {totalParts}...");
             _progressBar.Style = ProgressBarStyle.Continuous;
             _progressBar.Value = (int)Math.Round(((i + 1d) / totalParts) * 100d);
@@ -266,7 +265,14 @@ public sealed class MainForm : Form
             }
         }
 
-        Process.Start(startInfo);
+        var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            SetStatus("Failed to launch game.");
+            return;
+        }
+
+        Close();
     }
 
     private async Task<LauncherConfig> LoadConfigAsync()
