@@ -24,12 +24,7 @@ function Resolve-LocalPath {
 }
 
 function Split-File {
-    param(
-        [string]$SourcePath,
-        [string]$DestinationDir,
-        [int]$ChunkSizeBytes
-    )
-
+    param([string]$SourcePath, [string]$DestinationDir, [int]$ChunkSizeBytes)
     New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
     Get-ChildItem -LiteralPath $DestinationDir -File -ErrorAction SilentlyContinue | Remove-Item -Force
 
@@ -61,7 +56,6 @@ function Split-File {
     } finally {
         $source.Dispose()
     }
-
     return $parts
 }
 
@@ -72,6 +66,8 @@ $outputRootPath = Resolve-LocalPath -PathValue $OutputRoot -BasePath $PSScriptRo
 $publicRootPath = Resolve-LocalPath -PathValue $PublicRoot -BasePath $PSScriptRoot
 $publicDownloadsPath = Join-Path $publicRootPath "downloads"
 $publicLauncherPath = Join-Path $publicRootPath "launcher"
+$launcherProject = Join-Path $PSScriptRoot "LauncherApp\\LauncherApp.csproj"
+$launcherPublishDir = Join-Path $PSScriptRoot "LauncherApp\\bin\\Release\\net9.0-windows\\win-x64\\publish"
 
 if (-not (Test-Path -LiteralPath $buildClientDir)) { throw "Expected exported client at $buildClientDir" }
 
@@ -109,13 +105,14 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $publicLauncherPath "latest.json") -Encoding UTF8
 
+& dotnet publish $launcherProject -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true | Out-Null
+
 $launcherBundleDir = Join-Path $outputRootPath "EraOnlineLauncher"
 $launcherBundleZip = Join-Path $publicDownloadsPath "EraOnlineLauncher.zip"
 if (Test-Path -LiteralPath $launcherBundleDir) { Remove-Item -LiteralPath $launcherBundleDir -Recurse -Force }
 if (Test-Path -LiteralPath $launcherBundleZip) { Remove-Item -LiteralPath $launcherBundleZip -Force }
 New-Item -ItemType Directory -Force -Path $launcherBundleDir | Out-Null
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'EraOnlineLauncher.ps1') -Destination $launcherBundleDir
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Start-EraOnline.cmd') -Destination $launcherBundleDir
+Copy-Item -LiteralPath (Join-Path $launcherPublishDir 'EraOnlineLauncher.exe') -Destination $launcherBundleDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'launcher-config.json') -Destination $launcherBundleDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Destination $launcherBundleDir
 Compress-Archive -Path (Join-Path $launcherBundleDir '*') -DestinationPath $launcherBundleZip -CompressionLevel Optimal

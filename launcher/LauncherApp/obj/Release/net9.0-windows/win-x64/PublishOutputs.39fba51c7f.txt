@@ -1,0 +1,2 @@
+C:\eo3\launcher\LauncherApp\bin\Release\net9.0-windows\win-x64\publish\EraOnlineLauncher.pdb
+C:\eo3\launcher\LauncherApp\bin\Release\net9.0-windows\win-x64\publish\EraOnlineLauncher.exe
