@@ -1,8 +1,8 @@
 ﻿{
   "provider": "manifest",
-  "manifest_url": "",
-  "repo_owner": "",
-  "repo_name": "",
+  "manifest_url": "https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/latest.json",
+  "repo_owner": "blueavlo-hash",
+  "repo_name": "EraOnlinePort",
   "asset_pattern": "EraOnline-v*-client.zip",
   "exe_name": "EraOnline.exe",
   "launch_args": [],

@@ -74,11 +74,7 @@ function Get-LauncherConfig {
     }
 
     if (($config.provider -eq "manifest") -and [string]::IsNullOrWhiteSpace($config.manifest_url)) {
-        throw "Set manifest_url in launcher\launcher-config.json or add a GitHub origin remote."
-    }
-
-    if (($config.provider -eq "github") -and ([string]::IsNullOrWhiteSpace($config.repo_owner) -or [string]::IsNullOrWhiteSpace($config.repo_name))) {
-        throw "Set repo_owner and repo_name in launcher\launcher-config.json or add an origin remote."
+        throw "Set manifest_url in launcher-config.json."
     }
 
     return $config
@@ -88,68 +84,87 @@ function Get-LatestManifestRelease {
     param([object]$Config)
 
     $manifest = Invoke-RestMethod -Uri $Config.manifest_url -Method Get
-    if (-not $manifest.version -or -not $manifest.download_url) {
-        throw "Manifest at $($Config.manifest_url) is missing version or download_url."
+    if (-not $manifest.version) {
+        throw "Manifest at $($Config.manifest_url) is missing version."
+    }
+    if ((-not $manifest.download_url) -and (-not $manifest.download_parts)) {
+        throw "Manifest at $($Config.manifest_url) is missing download_url or download_parts."
     }
 
-    $assetName = $Config.exe_name
-    try {
-        $uri = [System.Uri]$manifest.download_url
-        $assetName = [System.IO.Path]::GetFileName($uri.AbsolutePath)
-    } catch {
+    $assetName = [string]($manifest.asset_name)
+    if ([string]::IsNullOrWhiteSpace($assetName)) {
+        if ($manifest.download_url) {
+            try {
+                $uri = [System.Uri]$manifest.download_url
+                $assetName = [System.IO.Path]::GetFileName($uri.AbsolutePath)
+            } catch {
+                $assetName = "package.zip"
+            }
+        } else {
+            $assetName = "package.zip"
+        }
     }
 
     return @{
         tag = [string]$manifest.version
-        name = [string]$manifest.name
-        asset_name = [string]$assetName
-        asset_url = [string]$manifest.download_url
-        published_at = [string]$manifest.published_at
+        name = [string]($manifest.name)
+        asset_name = $assetName
+        asset_url = [string]($manifest.download_url)
+        asset_parts = $manifest.download_parts
+        published_at = [string]($manifest.published_at)
     }
-}
-
-function Get-LatestGitHubRelease {
-    param([object]$Config)
-
-    $headers = @{
-        "User-Agent" = "EraOnlineLauncher"
-        "Accept" = "application/vnd.github+json"
-    }
-    $url = "https://api.github.com/repos/$($Config.repo_owner)/$($Config.repo_name)/releases"
-    $releases = Invoke-RestMethod -Uri $url -Headers $headers -Method Get
-
-    $eligible = $releases | Where-Object {
-        -not $_.draft -and ($Config.allow_prerelease -or -not $_.prerelease)
-    } | Sort-Object {[DateTime]$_.published_at} -Descending
-
-    if (-not $eligible) {
-        throw "No eligible releases found for $($Config.repo_owner)/$($Config.repo_name)."
-    }
-
-    foreach ($release in $eligible) {
-        $asset = $release.assets | Where-Object { $_.name -like $Config.asset_pattern } | Select-Object -First 1
-        if ($null -ne $asset) {
-            return @{
-                tag = $release.tag_name
-                name = $release.name
-                asset_name = $asset.name
-                asset_url = $asset.browser_download_url
-                published_at = $release.published_at
-            }
-        }
-    }
-
-    throw "No release asset matching '$($Config.asset_pattern)' was found."
 }
 
 function Get-LatestRelease {
     param([object]$Config)
+    return Get-LatestManifestRelease -Config $Config
+}
 
-    if ($Config.provider -eq "manifest") {
-        return Get-LatestManifestRelease -Config $Config
+function Download-ReleasePackage {
+    param(
+        [object]$Release,
+        [string]$DownloadsDir,
+        [string]$ZipPath
+    )
+
+    if ($Release.asset_parts -and $Release.asset_parts.Count -gt 0) {
+        $partDir = Join-Path $DownloadsDir "parts"
+        New-Item -ItemType Directory -Force -Path $partDir | Out-Null
+
+        if (Test-Path -LiteralPath $ZipPath) {
+            Remove-Item -LiteralPath $ZipPath -Force
+        }
+
+        $targetStream = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+        try {
+            $buffer = New-Object byte[] 1048576
+            foreach ($partUrl in $Release.asset_parts) {
+                $partName = [System.IO.Path]::GetFileName(([System.Uri]$partUrl).AbsolutePath)
+                $partPath = Join-Path $partDir $partName
+                Write-Host "Downloading $partName..."
+                Invoke-WebRequest -Uri $partUrl -OutFile $partPath
+
+                $sourceStream = [System.IO.File]::OpenRead($partPath)
+                try {
+                    while (($read = $sourceStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                        $targetStream.Write($buffer, 0, $read)
+                    }
+                } finally {
+                    $sourceStream.Dispose()
+                }
+            }
+        } finally {
+            $targetStream.Dispose()
+        }
+        return
     }
 
-    return Get-LatestGitHubRelease -Config $Config
+    if (-not $Release.asset_url) {
+        throw "Release manifest does not contain a usable download source."
+    }
+
+    Write-Host "Downloading $($Release.asset_name)..."
+    Invoke-WebRequest -Uri $Release.asset_url -OutFile $ZipPath
 }
 
 function Install-Release {
@@ -170,8 +185,7 @@ function Install-Release {
     New-Item -ItemType Directory -Force -Path $stagingDir | Out-Null
 
     $zipPath = Join-Path $downloadsDir $Release.asset_name
-    Write-Host "Downloading $($Release.asset_name)..."
-    Invoke-WebRequest -Uri $Release.asset_url -OutFile $zipPath
+    Download-ReleasePackage -Release $Release -DownloadsDir $downloadsDir -ZipPath $zipPath
 
     Write-Host "Extracting update..."
     Expand-Archive -Path $zipPath -DestinationPath $stagingDir -Force
@@ -192,7 +206,7 @@ function Install-Release {
         installed_name = $Release.name
         asset_name = $Release.asset_name
         installed_at = (Get-Date).ToString("o")
-        exe_relative_path = $exe.FullName.Substring($stagingDir.Length).TrimStart('\')
+        exe_relative_path = $exe.FullName.Substring($stagingDir.Length).TrimStart('\\')
     }
     Write-JsonFile -Path $StatePath -Value $state
 }

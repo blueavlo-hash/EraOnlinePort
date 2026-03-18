@@ -1,6 +1,9 @@
 ﻿{
     "version":  "0.5.0-alpha",
     "name":  "Era Online 0.5.0-alpha",
-    "published_at":  "2026-03-18T01:10:38.2137626Z",
-    "download_url":  "https://example.com/EraOnline-v0.5.0-alpha-client.zip"
+    "published_at":  "2026-03-18T01:22:53.7418927Z",
+    "asset_name":  "EraOnline-v0.5.0-alpha-client.zip",
+    "download_parts":  [
+                           "https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/downloads/EraOnline-v0.5.0-alpha-client/EraOnline-v0.5.0-alpha-client.zip.part001"
+                       ]
 }
