@@ -1,0 +1,3 @@
+# Era Online Data Pipeline - Python Dependencies
+# Uses only Python standard library - no external packages required.
+# Python 3.8+ required.

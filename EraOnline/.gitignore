@@ -1,0 +1,17 @@
+# Godot cache
+.godot/
+*.translation
+
+# Local build output
+build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

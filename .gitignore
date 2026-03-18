@@ -1,0 +1,40 @@
+﻿# Git
+.git/
+
+# OS / editors
+.claude/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Godot cache / local exports
+**/.godot/
+**/build/
+**/*.translation
+
+# Legacy VB6 build artifacts / logs
+*.exe
+*.dll
+*.ocx
+*.oca
+*.obj
+*.log
+*.pdm
+*.vbw
+*.exp
+*.lib
+
+# Launcher local state
+launcher/downloads/
+launcher/installed/
+launcher/release/
+launcher/state.json

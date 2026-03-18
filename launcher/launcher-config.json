@@ -1,0 +1,10 @@
+﻿{
+  "provider": "manifest",
+  "manifest_url": "",
+  "repo_owner": "",
+  "repo_name": "",
+  "asset_pattern": "EraOnline-v*-client.zip",
+  "exe_name": "EraOnline.exe",
+  "launch_args": [],
+  "allow_prerelease": true
+}
