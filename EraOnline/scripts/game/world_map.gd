@@ -2995,9 +2995,9 @@ func _update_lighting() -> void:
 	elif t >= 5.0 and t < 6.0:
 		darkness = 1.0 - (t - 5.0)           # dawn ramp 1→0
 
-	# Night sky tint: deep midnight navy
-	var day_col   := Color(1.0, 1.0, 1.0, 1.0)
-	var night_col := Color(0.03, 0.03, 0.10, 1.0)
+	# Night sky tint: dark navy — min brightness 0.25 so the world is never pitch black
+	var day_col   := Color(1.0,  1.0,  1.0,  1.0)
+	var night_col := Color(0.25, 0.25, 0.35, 1.0)
 	_canvas_mod.color = day_col.lerp(night_col, darkness)
 
 	# Propagate darkness to minimap

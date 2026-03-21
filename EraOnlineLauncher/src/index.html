@@ -188,6 +188,29 @@ html, body {
 /* Login form */
 #login-panel { flex-shrink: 0; }
 
+/* Login / Register tab row */
+.tab-row {
+  display: flex;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 4px 0 6px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+.tab-btn:hover { color: var(--gold); }
+.tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
+
 .field-label {
   font-size: 11px;
   color: var(--text-dim);
@@ -211,11 +234,45 @@ html, body {
 
 #remember-row {
   display: flex; align-items: center; gap: 6px;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   font-size: 11px; color: var(--text-dim);
   cursor: pointer;
 }
 #remember-row input { accent-color: var(--gold); cursor: pointer; }
+
+#register-fields { display: none; }
+
+/* Register action button (smaller, inside the panel) */
+#btn-create-account {
+  width: 100%;
+  padding: 7px 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--gold-dim);
+  background: linear-gradient(180deg, rgba(80,50,5,0.7) 0%, rgba(40,24,3,0.85) 100%);
+  color: var(--gold);
+  margin-top: 4px;
+  transition: all 0.2s;
+}
+#btn-create-account:hover {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(120,80,10,0.8) 0%, rgba(70,45,6,0.9) 100%);
+  color: #fff;
+}
+#btn-create-account:disabled { opacity: 0.5; cursor: default; }
+
+/* Auth status message shown inside the login panel */
+#auth-status {
+  font-size: 11px;
+  min-height: 16px;
+  margin-top: 4px;
+  text-align: center;
+  color: var(--text-dim);
+}
 
 /* Server status panel */
 #status-panel { flex-shrink: 0; }
@@ -452,14 +509,25 @@ html, body {
     <div id="left-col">
 
       <div class="panel" id="login-panel">
-        <div class="panel-title">Account</div>
+        <div class="tab-row">
+          <button class="tab-btn active" id="tab-login-btn">Login</button>
+          <button class="tab-btn"        id="tab-register-btn">Register</button>
+        </div>
         <div class="field-label">Username</div>
         <input class="field-input" id="inp-username" type="text" placeholder="Username" autocomplete="off" spellcheck="false">
         <div class="field-label">Password</div>
         <input class="field-input" id="inp-password" type="password" placeholder="Password" autocomplete="off">
+        <!-- Login-only fields -->
         <label id="remember-row">
           <input type="checkbox" id="chk-remember"> Remember me
         </label>
+        <!-- Register-only fields -->
+        <div id="register-fields">
+          <div class="field-label">Confirm Password</div>
+          <input class="field-input" id="inp-confirm-password" type="password" placeholder="Confirm password" autocomplete="off">
+          <button id="btn-create-account">Create Account</button>
+        </div>
+        <div id="auth-status"></div>
       </div>
 
       <div class="panel" id="status-panel">

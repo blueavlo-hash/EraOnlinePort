@@ -138,6 +138,77 @@ function toast(msg, type = 'info', duration = 4000) {
 }
 
 // ---------------------------------------------------------------------------
+// Login / Register tab switching
+// ---------------------------------------------------------------------------
+let _isRegisterTab = false
+const tabLoginBtn    = document.getElementById('tab-login-btn')
+const tabRegisterBtn = document.getElementById('tab-register-btn')
+const rememberRow    = document.getElementById('remember-row')
+const registerFields = document.getElementById('register-fields')
+const authStatus     = document.getElementById('auth-status')
+const btnCreateAcct  = document.getElementById('btn-create-account')
+
+function setAuthStatus(msg, color = 'var(--text-dim)') {
+  authStatus.style.color = color
+  authStatus.textContent = msg
+}
+
+function switchTab(toRegister) {
+  _isRegisterTab = toRegister
+  tabLoginBtn.classList.toggle('active', !toRegister)
+  tabRegisterBtn.classList.toggle('active', toRegister)
+  rememberRow.style.display    = toRegister ? 'none' : ''
+  registerFields.style.display = toRegister ? 'block' : 'none'
+  setAuthStatus('')
+  if (toRegister) {
+    playBtn.textContent = 'Create Account'
+  } else {
+    setPlayBtn(_needsUpdate ? 'error' : (_manifest ? 'play' : 'checking'))
+  }
+}
+
+tabLoginBtn.addEventListener('click',    () => switchTab(false))
+tabRegisterBtn.addEventListener('click', () => switchTab(true))
+
+async function doRegister() {
+  const username = document.getElementById('inp-username').value.trim()
+  const password = document.getElementById('inp-password').value
+  const confirm  = document.getElementById('inp-confirm-password').value
+  const addr     = document.getElementById('inp-server-addr').value.trim() || '127.0.0.1'
+  const port     = parseInt(document.getElementById('server-port-input').value.trim()) || 6969
+
+  if (!username) { setAuthStatus('Please enter a username.', '#ff6060'); return }
+  if (!password) { setAuthStatus('Please enter a password.', '#ff6060'); return }
+  if (password !== confirm) { setAuthStatus('Passwords do not match.', '#ff6060'); return }
+
+  btnCreateAcct.disabled = true
+  playBtn.disabled = true
+  setAuthStatus('Creating account...', 'var(--text-dim)')
+
+  const result = await api.registerAccount({ username, password, serverAddr: addr, serverPort: port })
+
+  btnCreateAcct.disabled = false
+  playBtn.disabled = false
+
+  if (result.ok) {
+    setAuthStatus('Account created! You can now log in.', 'var(--green-bright)')
+    // Switch to login tab with username pre-filled
+    switchTab(false)
+    document.getElementById('inp-username').value = username
+    document.getElementById('inp-password').value = ''
+    document.getElementById('inp-password').focus()
+  } else {
+    setAuthStatus(result.error || 'Registration failed.', '#ff6060')
+  }
+}
+
+// Wire register button and Enter-in-confirm-password
+btnCreateAcct.addEventListener('click', doRegister)
+document.getElementById('inp-confirm-password').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doRegister()
+})
+
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 let _manifest       = null
@@ -350,10 +421,16 @@ async function _autoInstall() {
 }
 
 // ---------------------------------------------------------------------------
-// Play button (launch only — updates are automatic)
+// Play button — launches game in login mode, creates account in register mode
 // ---------------------------------------------------------------------------
 playBtn.addEventListener('click', async () => {
   if (_isDownloading) return
+
+  // Register mode: delegate to registration flow
+  if (_isRegisterTab) {
+    await doRegister()
+    return
+  }
 
   // Retry after failed download
   if (_needsUpdate && _manifest) {
@@ -377,7 +454,7 @@ playBtn.addEventListener('click', async () => {
   })
 
   if (!result.ok) {
-    if (!result.ok && result.error && result.error.includes('not installed')) {
+    if (result.error && result.error.includes('not installed')) {
       // Exe is missing — re-download automatically
       _needsUpdate = true
       await _autoInstall()

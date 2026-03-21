@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('launcher', {
   // Game download progress
   onProgress: (cb) => ipcRenderer.on('download-progress', (_e, data) => cb(data)),
 
+  // Account management (calls game server HTTP API)
+  registerAccount: (opts) => ipcRenderer.invoke('register-account', opts),
+  verifyAccount:   (opts) => ipcRenderer.invoke('verify-account',   opts),
+
   // Launcher version
   getVersion: () => ipcRenderer.invoke('get-version'),
 

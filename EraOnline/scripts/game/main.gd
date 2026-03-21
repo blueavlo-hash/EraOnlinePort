@@ -4,6 +4,9 @@ extends Node
 
 const WORLD_SCENE := "res://scenes/game/World.tscn"
 
+var _prefill_user:  String = ""
+var _prefill_token: String = ""
+
 
 func _ready() -> void:
 	print("============================================")
@@ -25,15 +28,11 @@ func _ready() -> void:
 	elif "--editor" in args:
 		_start_editor()
 	else:
-		var username := _get_arg(args, "--username")
-		var token    := _get_arg(args, "--token")
-		var addr     := _get_arg(args, "--server-address", "127.0.0.1")
-		var port     := int(_get_arg(args, "--server-port", "6969"))
-		if username != "" and token != "":
-			# Launched from the official launcher — skip splash, auto-login
-			_on_online_requested(addr, port, username, token)
-		else:
-			_show_splash()
+		_prefill_user  = _get_arg(args, "--username")
+		_prefill_token = _get_arg(args, "--token")
+		var addr := _get_arg(args, "--server-address", "127.0.0.1")
+		var port := int(_get_arg(args, "--server-port", "6969"))
+		_show_splash(addr, port)
 
 
 func _get_arg(args: PackedStringArray, key: String, default_val: String = "") -> String:
@@ -65,11 +64,17 @@ func _start_editor() -> void:
 	queue_free()
 
 
-func _show_splash() -> void:
+func _show_splash(addr: String = "127.0.0.1", port: int = 6969) -> void:
 	var splash := preload("res://scripts/ui/splash_ui.gd").new()
 	splash.name = "SplashUI"
+	if _prefill_user != "":
+		splash._launcher_user = _prefill_user
+		splash._launcher_addr = addr
+		splash._launcher_port = port
 	add_child(splash)
-	splash.online_requested.connect(_on_online_requested)
+	splash.online_requested.connect(
+		func(a: String, p: int): _on_online_requested(a, p, _prefill_user, _prefill_token)
+	)
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +95,7 @@ func _on_online_requested(address: String, port: int, prefill_user: String = "",
 
 	# Char select UI (hidden until char_list_received)
 	var char_ui := preload("res://scripts/ui/char_select_ui.gd").new()
-	char_ui.name  = "CharSelectUI"
+	char_ui.name    = "CharSelectUI"
 	char_ui.visible = false
 	add_child(char_ui)
 

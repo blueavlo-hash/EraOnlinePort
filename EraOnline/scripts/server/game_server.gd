@@ -447,8 +447,8 @@ var _world_event_acc:  float = 0.0
 var _time_of_day:      float = 8.0    # in-game hours, starts at 8am
 var _time_acc:         float = 0.0    # accumulator for time advance
 var _time_sync_acc:    float = 0.0    # timer for broadcasting time to clients
-# Full 20-min real cycle = 24 in-game hours. Rate = 24.0 / (20.0 * 60.0) hours/second
-const TIME_RATE:       float = 24.0 / 1200.0
+# Full 2-hour real cycle = 24 in-game hours. Rate = 24.0 / (120.0 * 60.0) hours/second
+const TIME_RATE:       float = 24.0 / 7200.0
 const TIME_SYNC_INTERVAL: float = 10.0  # broadcast time every 10 real seconds
 var _world_event_active: bool = false
 var _world_event_map:  int = 0
@@ -2763,6 +2763,26 @@ func _enter_world(client, char_dict: Dictionary) -> void:
 		char_dict["map_id"] = SPAWN_MAP
 		char_dict["x"]      = SPAWN_X
 		char_dict["y"]      = SPAWN_Y
+
+	# Redirect characters saved on maps with no ground tiles (empty/inaccessible maps).
+	var _check_map_id: int = char_dict.get("map_id", 1)
+	var _check_map := GameData.get_map(_check_map_id)
+	if _check_map == null:
+		char_dict["map_id"] = SPAWN_MAP
+		char_dict["x"]      = SPAWN_X
+		char_dict["y"]      = SPAWN_Y
+	else:
+		var _tiles: Dictionary = _check_map.get("tiles", {})
+		var _has_ground := false
+		for _tk in _tiles:
+			if int(_tiles[_tk].get("layers", [0, 0, 0])[0]) > 0:
+				_has_ground = true
+				break
+		if not _has_ground:
+			print("[Server] %s saved on empty map %d — redirecting to spawn." % [client.username, _check_map_id])
+			char_dict["map_id"] = SPAWN_MAP
+			char_dict["x"]      = SPAWN_X
+			char_dict["y"]      = SPAWN_Y
 
 	var map_id: int = char_dict.get("map_id", 1)
 	var cx: int     = char_dict.get("x", 10)
@@ -6619,12 +6639,14 @@ func _encounter_templates_for(player_level: int) -> Array:
 # ---------------------------------------------------------------------------
 
 ## ---------------------------------------------------------------------------
-## HTTP Status Server — responds to GET /status on port 6969+1 (6970)
-## Used by the launcher to show online/offline + player count.
+## HTTP API Server — port 6970 (PORT + 1)
+## GET  /status           → player count (used by launcher)
+## POST /api/register     → create a new account
+## POST /api/login        → verify credentials (pre-flight check from launcher)
 ## ---------------------------------------------------------------------------
 const STATUS_HTTP_PORT : int = 6970
 var _status_tcp: TCPServer = null
-var _status_clients: Array = []
+var _status_clients: Array = []  # Array of {conn: StreamPeerTCP, buf: PackedByteArray}
 
 func _start_status_server() -> void:
 	_status_tcp = TCPServer.new()
@@ -6632,27 +6654,94 @@ func _start_status_server() -> void:
 	if err != OK:
 		push_error("[Status] Could not listen on port %d" % STATUS_HTTP_PORT)
 		return
-	print("[Status] HTTP status server on port %d" % STATUS_HTTP_PORT)
+	print("[Status] HTTP API server on port %d" % STATUS_HTTP_PORT)
 
 func _tick_status_server() -> void:
 	if _status_tcp == null:
 		return
 	if _status_tcp.is_connection_available():
-		_status_clients.append(_status_tcp.take_connection())
+		_status_clients.append({"conn": _status_tcp.take_connection(), "buf": PackedByteArray()})
 	for i in range(_status_clients.size() - 1, -1, -1):
-		var conn: StreamPeerTCP = _status_clients[i]
+		var entry: Dictionary = _status_clients[i]
+		var conn: StreamPeerTCP = entry["conn"]
 		if conn.get_status() != StreamPeerTCP.STATUS_CONNECTED:
 			_status_clients.remove_at(i)
 			continue
 		var avail := conn.get_available_bytes()
-		if avail <= 0:
+		if avail > 0:
+			var rd := conn.get_data(avail)
+			if rd[0] == OK:
+				entry["buf"].append_array(rd[1])
+		var buf_str: String = entry["buf"].get_string_from_utf8()
+		var sep := buf_str.find("\r\n\r\n")
+		if sep < 0:
 			continue
-		conn.get_string(avail)  # consume request, we don't parse it
-		var player_count := _clients.size()
-		var body := '{"online":true,"players":%d,"max":1000}' % player_count
-		var response := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" % [body.length(), body]
+		var headers_raw := buf_str.substr(0, sep)
+		var body_raw    := buf_str.substr(sep + 4)
+		var lines := headers_raw.split("\r\n")
+		var req_parts := lines[0].split(" ") if lines.size() > 0 else []
+		var method := req_parts[0] if req_parts.size() > 0 else "GET"
+		var path   := req_parts[1] if req_parts.size() > 1 else "/"
+		var content_length := 0
+		for line in lines:
+			var ll := (line as String).to_lower()
+			if ll.begins_with("content-length:"):
+				var cl_parts := ll.split(":")
+				if cl_parts.size() > 1:
+					content_length = int(cl_parts[1].strip_edges())
+		if body_raw.length() < content_length:
+			continue  # Body not fully received yet
+		var response := _handle_http(method, path, body_raw.substr(0, content_length))
 		conn.put_data(response.to_utf8_buffer())
 		_status_clients.remove_at(i)
+
+
+func _handle_http(method: String, path: String, body: String) -> String:
+	var cors := "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n"
+	if method == "OPTIONS":
+		return "HTTP/1.1 204 No Content\r\n" + cors + "Connection: close\r\n\r\n"
+	if path == "/status" or path == "/" or path.begins_with("/status?"):
+		var cnt := _clients.size()
+		var b := '{"online":true,"players":%d,"max":1000}' % cnt
+		return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" + cors + "Content-Length: %d\r\nConnection: close\r\n\r\n%s" % [b.length(), b]
+	if method == "POST" and path == "/api/register":
+		return _http_register(body, cors)
+	if method == "POST" and path == "/api/login":
+		return _http_login_check(body, cors)
+	return _http_resp(404, '{"ok":false,"error":"Not found"}', cors)
+
+
+func _http_register(body: String, cors: String) -> String:
+	var data: Variant = JSON.parse_string(body)
+	if data == null or not data is Dictionary:
+		return _http_resp(400, '{"ok":false,"error":"Invalid JSON"}', cors)
+	var username: String = str(data.get("username", "")).strip_edges()
+	var password: String = str(data.get("password", ""))
+	var result := _db.create_account(username, password)
+	if result["ok"]:
+		print("[HTTP] Registered account: %s" % username)
+		return _http_resp(200, '{"ok":true}', cors)
+	var reason: String = (result.get("reason", "Registration failed") as String).replace('"', '\\"')
+	return _http_resp(409, '{"ok":false,"error":"%s"}' % reason, cors)
+
+
+func _http_login_check(body: String, cors: String) -> String:
+	var data: Variant = JSON.parse_string(body)
+	if data == null or not data is Dictionary:
+		return _http_resp(400, '{"ok":false,"error":"Invalid JSON"}', cors)
+	var username: String = str(data.get("username", "")).strip_edges()
+	var password: String = str(data.get("password", ""))
+	if not _db.verify_password(username, password):
+		return _http_resp(401, '{"ok":false,"error":"Invalid username or password"}', cors)
+	return _http_resp(200, '{"ok":true}', cors)
+
+
+func _http_resp(code: int, body: String, extra_headers: String = "") -> String:
+	var status_map := {200: "OK", 204: "No Content", 400: "Bad Request",
+		401: "Unauthorized", 404: "Not Found", 409: "Conflict"}
+	var status_text: String = status_map.get(code, "Error")
+	return "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n%sContent-Length: %d\r\nConnection: close\r\n\r\n%s" % [
+		code, status_text, extra_headers, body.length(), body]
 
 func _load_admin_list() -> void:
 	var path := "user://server_data/admins.txt"

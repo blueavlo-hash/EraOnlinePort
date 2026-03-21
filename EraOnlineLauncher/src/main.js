@@ -308,6 +308,53 @@ ipcMain.handle('get-news', async () => {
 ipcMain.on('open-url', (_event, url) => shell.openExternal(url))
 
 // ---------------------------------------------------------------------------
+// Helper: plain HTTP POST to the game server's API port (PORT+1 = 6970)
+// ---------------------------------------------------------------------------
+function gameApiPost(serverAddr, serverPort, path, bodyObj) {
+  return new Promise((resolve) => {
+    const bodyStr = JSON.stringify(bodyObj)
+    const apiPort = (parseInt(serverPort) || 6969) + 1
+    const host    = serverAddr || '127.0.0.1'
+    const options = {
+      hostname: host,
+      port:     apiPort,
+      path:     path,
+      method:   'POST',
+      headers: {
+        'Content-Type':   'application/json',
+        'Content-Length': Buffer.byteLength(bodyStr),
+      },
+    }
+    const req = http.request(options, (res) => {
+      let data = ''
+      res.on('data', (chunk) => { data += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) }
+        catch { resolve({ ok: false, error: 'Invalid server response' }) }
+      })
+    })
+    req.on('error', (e) => resolve({ ok: false, error: e.message }))
+    req.setTimeout(6000, () => { req.destroy(); resolve({ ok: false, error: 'Server did not respond. Make sure the game server is running.' }) })
+    req.write(bodyStr)
+    req.end()
+  })
+}
+
+// ---------------------------------------------------------------------------
+// IPC: register a new account via game server HTTP API
+// ---------------------------------------------------------------------------
+ipcMain.handle('register-account', async (_event, { username, password, serverAddr, serverPort }) => {
+  return gameApiPost(serverAddr, serverPort, '/api/register', { username, password })
+})
+
+// ---------------------------------------------------------------------------
+// IPC: verify credentials via game server HTTP API (pre-launch check)
+// ---------------------------------------------------------------------------
+ipcMain.handle('verify-account', async (_event, { username, password, serverAddr, serverPort }) => {
+  return gameApiPost(serverAddr, serverPort, '/api/login', { username, password })
+})
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 function fetchText(url, timeoutMs = 8000) {

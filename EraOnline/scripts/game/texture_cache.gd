@@ -40,23 +40,28 @@ func preload_range(from_num: int, to_num: int) -> void:
 
 
 func _load(file_num: int) -> Texture2D:
+	# Build all name variants to handle mixed-case filenames in the asset folder:
+	#   grh1.png  Grh1.png  GRH1.PNG  etc.
+	var prefixes := ["grh", "Grh", "GRH"]
 	for ext in EXTENSIONS:
-		var file_name := "grh%d.%s" % [file_num, ext]
-		var external_path := _get_external_graphics_path(file_name)
-		if not external_path.is_empty():
-			var img := Image.load_from_file(external_path)
-			if img != null and not img.is_empty():
-				_apply_color_key(img)
-				return ImageTexture.create_from_image(img)
-		var res_path := GRAPHICS_PATH + file_name
-		var tex := load(res_path) as Texture2D
-		if tex != null:
-			var img := tex.get_image()
-			if img != null and not img.is_empty():
-				_apply_color_key(img)
-				return ImageTexture.create_from_image(img)
-			return tex
-	push_warning("[TextureCache] Not found: grh%d (tried bmp/jpg/png)" % file_num)
+		for prefix in prefixes:
+			var file_name := "%s%d.%s" % [prefix, file_num, ext]
+			var external_path := _get_external_graphics_path(file_name)
+			if not external_path.is_empty():
+				var img := Image.load_from_file(external_path)
+				if img != null and not img.is_empty():
+					_apply_color_key(img)
+					return ImageTexture.create_from_image(img)
+			# res:// path — case must match what the Godot project imported
+			var res_path := GRAPHICS_PATH + file_name
+			var tex := load(res_path) as Texture2D
+			if tex != null:
+				var img := tex.get_image()
+				if img != null and not img.is_empty():
+					_apply_color_key(img)
+					return ImageTexture.create_from_image(img)
+				return tex
+	push_warning("[TextureCache] Not found: grh%d (tried all prefix/ext variants)" % file_num)
 	return null
 
 
