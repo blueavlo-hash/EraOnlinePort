@@ -1,8 +1,8 @@
-version: 1.0.7
+version: 1.0.8
 files:
-  - url: https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.0-alpha/Era.Online.Launcher.Setup.1.0.7.exe
-    sha512: Y4LEJ35EgZtc9FyftLfchAiC9fTr000fIzobP7JwBR+cEGJOZWPUiZogToojOZ/V40CKpeXreU9/t3kINdRfDA==
-    size: 87606809
-path: https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.0-alpha/Era.Online.Launcher.Setup.1.0.7.exe
-sha512: Y4LEJ35EgZtc9FyftLfchAiC9fTr000fIzobP7JwBR+cEGJOZWPUiZogToojOZ/V40CKpeXreU9/t3kINdRfDA==
+  - url: https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.0-alpha/Era.Online.Launcher.Setup.1.0.8.exe
+    sha512: xLxrB7Slj7lOTEpvwT8n+Y6KLCBoezK5GIbkfo8x7XvgMFbVtnLapSCmAHNjOsM0s7QKUEJiEf2jtJqte1WjPg==
+    size: 87607077
+path: https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.0-alpha/Era.Online.Launcher.Setup.1.0.8.exe
+sha512: xLxrB7Slj7lOTEpvwT8n+Y6KLCBoezK5GIbkfo8x7XvgMFbVtnLapSCmAHNjOsM0s7QKUEJiEf2jtJqte1WjPg==
 releaseDate: '2026-03-21T00:00:00.000Z'

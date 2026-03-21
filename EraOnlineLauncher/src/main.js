@@ -45,7 +45,13 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow()
-  setupAutoUpdater()
+  // Wait for renderer to finish loading before starting the update check.
+  // checkForUpdates() fires 'checking-for-update' synchronously, so if we
+  // call it before the renderer's ipcRenderer.on listeners are registered,
+  // the events are dropped and the UI gets stuck waiting forever.
+  win.webContents.once('did-finish-load', () => {
+    setupAutoUpdater()
+  })
 })
 app.on('window-all-closed', () => app.quit())
 

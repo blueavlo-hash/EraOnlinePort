@@ -493,7 +493,7 @@ document.getElementById('inp-username').addEventListener('input', () => {
       refreshStatus()
       loadNews()
     }
-  }, 8000)
+  }, 3000)
 })()
 
 // ---------------------------------------------------------------------------
