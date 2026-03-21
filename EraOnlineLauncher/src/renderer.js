@@ -5,6 +5,16 @@
 const api = window.launcher
 
 // ---------------------------------------------------------------------------
+// Background music
+// ---------------------------------------------------------------------------
+;(function initMusic() {
+  const music = document.getElementById('bg-music')
+  if (!music) return
+  music.volume = 0.45
+  music.play().catch(() => {})
+})()
+
+// ---------------------------------------------------------------------------
 // Particles
 // ---------------------------------------------------------------------------
 ;(function initParticles() {
@@ -315,10 +325,11 @@ playBtn.addEventListener('click', async () => {
   const port     = parseInt(document.getElementById('server-port-input').value.trim()) || 6969
 
   const result = await api.launchGame({
-    username:      username || null,
-    token:         password || null,
-    serverAddress: addr,
-    serverPort:    port,
+    username:        username || null,
+    token:           password || null,
+    serverAddress:   addr,
+    serverPort:      port,
+    expectedVersion: _manifest?.version || null,
   })
 
   if (!result.ok) {

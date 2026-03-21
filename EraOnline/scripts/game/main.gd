@@ -25,7 +25,22 @@ func _ready() -> void:
 	elif "--editor" in args:
 		_start_editor()
 	else:
-		_show_splash()
+		var username := _get_arg(args, "--username")
+		var token    := _get_arg(args, "--token")
+		var addr     := _get_arg(args, "--server-address", "127.0.0.1")
+		var port     := int(_get_arg(args, "--server-port", "6969"))
+		if username != "" and token != "":
+			# Launched from the official launcher — skip splash, auto-login
+			_on_online_requested(addr, port, username, token)
+		else:
+			_show_splash()
+
+
+func _get_arg(args: PackedStringArray, key: String, default_val: String = "") -> String:
+	var idx := args.find(key)
+	if idx >= 0 and idx + 1 < args.size():
+		return args[idx + 1]
+	return default_val
 
 
 func _start_server() -> void:
@@ -61,7 +76,7 @@ func _show_splash() -> void:
 # Online flow
 # ---------------------------------------------------------------------------
 
-func _on_online_requested(address: String, port: int) -> void:
+func _on_online_requested(address: String, port: int, prefill_user: String = "", prefill_token: String = "") -> void:
 	var splash := get_node_or_null("SplashUI")
 	if splash:
 		splash.queue_free()
@@ -70,6 +85,8 @@ func _on_online_requested(address: String, port: int) -> void:
 	var login_ui := preload("res://scripts/ui/login_ui.gd").new()
 	login_ui.name = "LoginUI"
 	add_child(login_ui)
+	if prefill_user != "" and prefill_token != "":
+		login_ui.set_auto_login(prefill_user, prefill_token)
 
 	# Char select UI (hidden until char_list_received)
 	var char_ui := preload("res://scripts/ui/char_select_ui.gd").new()

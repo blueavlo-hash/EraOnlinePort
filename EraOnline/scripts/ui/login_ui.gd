@@ -24,6 +24,8 @@ var _remember_check: CheckBox = null
 var _status_lbl:   Label    = null
 var _submit_btn:   Button   = null
 var _toggle_btn:   Button   = null
+var _auto_user:    String   = ""
+var _auto_pass:    String   = ""
 
 
 func _ready() -> void:
@@ -188,9 +190,20 @@ func _on_submit() -> void:
 		Network.login(user, pass_)
 
 
+func set_auto_login(user: String, pass_: String) -> void:
+	_auto_user = user
+	_auto_pass = pass_
+
+
 func _on_connected() -> void:
 	_set_status("Connected. Please log in.", C_TEXT)
 	_submit_btn.disabled = false
+	if _auto_user != "" and _auto_pass != "":
+		_user_field.text = _auto_user
+		_pass_field.text = _auto_pass
+		_set_status("Logging in...", C_DIM)
+		_submit_btn.disabled = true
+		Network.login(_auto_user, _auto_pass)
 
 
 func _on_connection_failed(reason: String) -> void:

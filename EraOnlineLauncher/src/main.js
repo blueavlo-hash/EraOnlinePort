@@ -140,13 +140,25 @@ ipcMain.handle('install-update', async (_event, manifest) => {
     const combined = Buffer.concat(chunks)
     fs.writeFileSync(tmpZip, combined)
 
-    // Extract zip via PowerShell (no extra deps)
+    // Extract to a temp dir first so we can handle subfolder structure
     win?.webContents.send('download-progress', { percent: 100, phase: 'Extracting...' })
-    await extractZip(tmpZip, INSTALL_DIR)
+    const tmpExtract = path.join(os.tmpdir(), `EraOnline-extract-${Date.now()}`)
+    if (fs.existsSync(tmpExtract)) fs.rmSync(tmpExtract, { recursive: true, force: true })
+    await extractZip(tmpZip, tmpExtract)
+    fs.unlinkSync(tmpZip)
+
+    // Find the directory that contains EraOnline.exe (handles any subfolder depth)
+    const gameDir = findFileDir(tmpExtract, 'EraOnline.exe')
+    if (!gameDir) throw new Error('EraOnline.exe not found in downloaded package.')
+
+    // Copy game files to install dir
+    fs.mkdirSync(INSTALL_DIR, { recursive: true })
+    win?.webContents.send('download-progress', { percent: 100, phase: 'Installing...' })
+    await copyDir(gameDir, INSTALL_DIR)
+    fs.rmSync(tmpExtract, { recursive: true, force: true })
 
     // Write version marker
     fs.writeFileSync(VERSION_FILE, manifest.version, 'utf8')
-    fs.unlinkSync(tmpZip)
 
     return { ok: true }
   } catch (e) {
@@ -157,9 +169,14 @@ ipcMain.handle('install-update', async (_event, manifest) => {
 // ---------------------------------------------------------------------------
 // IPC: launch game
 // ---------------------------------------------------------------------------
-ipcMain.handle('launch-game', async (_event, { username, token, serverAddress, serverPort }) => {
+ipcMain.handle('launch-game', async (_event, { username, token, serverAddress, serverPort, expectedVersion }) => {
   if (!fs.existsSync(GAME_EXE)) {
-    return { ok: false, error: 'Game not installed.' }
+    return { ok: false, error: 'Game not installed. Click Update to download.' }
+  }
+  const installedVersion = fs.existsSync(VERSION_FILE)
+    ? fs.readFileSync(VERSION_FILE, 'utf8').trim() : null
+  if (expectedVersion && installedVersion !== expectedVersion) {
+    return { ok: false, error: 'Game client is outdated. Click Update before launching.' }
   }
   const args = []
   if (username) args.push('--username', username)
@@ -245,6 +262,29 @@ function downloadWithProgress(url, onProgress) {
       res.on('error', reject)
     }).on('error', reject)
   })
+}
+
+// Find the directory containing a target filename (recursive)
+function findFileDir(dir, filename) {
+  for (const entry of fs.readdirSync(dir)) {
+    const full = path.join(dir, entry)
+    if (entry === filename) return dir
+    if (fs.statSync(full).isDirectory()) {
+      const found = findFileDir(full, filename)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+// Recursively copy a directory
+function copyDir(src, dest) {
+  fs.mkdirSync(dest, { recursive: true })
+  for (const entry of fs.readdirSync(src)) {
+    const s = path.join(src, entry), d = path.join(dest, entry)
+    if (fs.statSync(s).isDirectory()) copyDir(s, d)
+    else fs.copyFileSync(s, d)
+  }
 }
 
 function extractZip(zipPath, destDir) {
