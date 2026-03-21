@@ -45,36 +45,34 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow()
-  // Wait for renderer to finish loading before starting the update check.
-  // checkForUpdates() fires 'checking-for-update' synchronously, so if we
-  // call it before the renderer's ipcRenderer.on listeners are registered,
-  // the events are dropped and the UI gets stuck waiting forever.
-  win.webContents.once('did-finish-load', () => {
-    setupAutoUpdater()
-  })
+  setupAutoUpdater()
 })
 app.on('window-all-closed', () => app.quit())
 
 // ---------------------------------------------------------------------------
 // Auto-updater (launcher self-update via electron-updater)
 // ---------------------------------------------------------------------------
+// Promise that resolves once we know whether a launcher update is available.
+// Renderer invokes 'check-launcher-update' to await this result — pull-based,
+// so there are no IPC timing issues regardless of when the renderer loads.
+let _resolveUpdateCheck = null
+const _updateCheckPromise = new Promise((resolve) => { _resolveUpdateCheck = resolve })
+const _resolveOnce = (result) => {
+  if (_resolveUpdateCheck) { _resolveUpdateCheck(result); _resolveUpdateCheck = null }
+}
+
 function setupAutoUpdater() {
   autoUpdater.setFeedURL({
     provider: 'generic',
     url: 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher',
   })
-  autoUpdater.autoDownload    = true
+  autoUpdater.autoDownload         = true
   autoUpdater.autoInstallOnAppQuit = false
 
-  autoUpdater.on('checking-for-update', () => {
-    win?.webContents.send('launcher-checking-update')
-  })
-  autoUpdater.on('update-available', (info) => {
-    win?.webContents.send('launcher-update-available', info.version)
-  })
-  autoUpdater.on('update-not-available', () => {
-    win?.webContents.send('launcher-check-done')
-  })
+  autoUpdater.on('update-not-available', () => _resolveOnce({ upToDate: true }))
+  autoUpdater.on('update-available',  (info) => _resolveOnce({ upToDate: false, version: info.version }))
+  autoUpdater.on('error',             ()     => _resolveOnce({ upToDate: true }))
+
   autoUpdater.on('download-progress', (p) => {
     win?.webContents.send('launcher-update-progress', {
       phase: `Downloading launcher... ${Math.round(p.percent)}%`,
@@ -84,18 +82,15 @@ function setupAutoUpdater() {
     win?.webContents.send('launcher-update-progress', { phase: 'Installing...' })
     setTimeout(() => autoUpdater.quitAndInstall(true, true), 1500)
   })
-  autoUpdater.on('error', () => {
-    // Can't reach update server — proceed anyway
-    win?.webContents.send('launcher-check-done')
-  })
 
-  // Check immediately — renderer waits for result before starting game checks
-  autoUpdater.checkForUpdates().catch(() => {
-    win?.webContents.send('launcher-check-done')
-  })
+  // Safety timeout — proceed after 10s even if GitHub is unreachable
+  setTimeout(() => _resolveOnce({ upToDate: true }), 10000)
+
+  autoUpdater.checkForUpdates().catch(() => _resolveOnce({ upToDate: true }))
 }
 
-ipcMain.handle('get-version', () => app.getVersion())
+ipcMain.handle('get-version',            () => app.getVersion())
+ipcMain.handle('check-launcher-update',  () => _updateCheckPromise)
 
 // ---------------------------------------------------------------------------
 // IPC: window controls

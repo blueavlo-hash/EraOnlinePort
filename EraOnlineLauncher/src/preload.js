@@ -20,10 +20,7 @@ contextBridge.exposeInMainWorld('launcher', {
   // Launcher version
   getVersion: () => ipcRenderer.invoke('get-version'),
 
-  // Launcher auto-update events (from electron-updater)
-  onLauncherCheckingUpdate:  (cb) => ipcRenderer.on('launcher-checking-update',  (_e)    => cb()),
-  onLauncherCheckDone:       (cb) => ipcRenderer.on('launcher-check-done',       (_e)    => cb()),
-  onLauncherUpdateAvailable: (cb) => ipcRenderer.on('launcher-update-available', (_e, v) => cb(v)),
-  onLauncherUpdateProgress:  (cb) => ipcRenderer.on('launcher-update-progress',  (_e, d) => cb(d)),
-  onLauncherUpdateError:     (cb) => ipcRenderer.on('launcher-update-error',     (_e, e) => cb(e)),
+  // Launcher auto-update — pull-based: renderer asks, main answers
+  checkLauncherUpdate:      ()   => ipcRenderer.invoke('check-launcher-update'),
+  onLauncherUpdateProgress: (cb) => ipcRenderer.on('launcher-update-progress', (_e, d) => cb(d)),
 })

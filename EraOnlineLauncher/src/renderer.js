@@ -430,80 +430,52 @@ document.getElementById('inp-username').addEventListener('input', () => {
 // ---------------------------------------------------------------------------
 // Launcher auto-update overlay + boot sequencer
 // ---------------------------------------------------------------------------
-;(function setupLauncherUpdateUI() {
-  let overlay     = null
-  let checkDone   = false
+;(function boot() {
+  // Build and show overlay immediately — no waiting for IPC events
+  const overlay = document.createElement('div')
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(8,5,2,0.97);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 18px;
+  `
+  overlay.innerHTML = `
+    <div style="color:#D9A626;font-size:15px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">
+      Era Online Launcher
+    </div>
+    <div id="lu-status" style="color:#c8b97a;font-size:12px;">Checking for updates...</div>
+    <div style="width:340px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+      <div id="lu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#8B5E0A,#D9A626);border-radius:3px;transition:width 0.3s;"></div>
+    </div>
+  `
+  document.body.appendChild(overlay)
 
-  // Blocking overlay used for both "checking" and "downloading" states
-  function getOverlay(title) {
-    if (!overlay) {
-      overlay = document.createElement('div')
-      overlay.style.cssText = `
-        position: fixed; inset: 0; z-index: 9999;
-        background: rgba(8,5,2,0.97);
-        display: flex; flex-direction: column;
-        align-items: center; justify-content: center;
-        gap: 18px;
-      `
-      overlay.innerHTML = `
-        <div style="color:#D9A626;font-size:15px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">
-          ${title || 'Era Online Launcher'}
-        </div>
-        <div id="lu-status" style="color:#c8b97a;font-size:12px;"></div>
-        <div style="width:340px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
-          <div id="lu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#8B5E0A,#D9A626);border-radius:3px;transition:width 0.3s;"></div>
-        </div>
-      `
-      document.body.appendChild(overlay)
-    }
-    return overlay
-  }
+  const luStatus = overlay.querySelector('#lu-status')
+  const luBar    = overlay.querySelector('#lu-bar')
 
-  function removeOverlay() {
-    overlay?.remove()
-    overlay = null
-  }
-
-  // Step 1: checking — block the entire UI immediately
-  api.onLauncherCheckingUpdate(() => {
-    const ov = getOverlay('Checking for Updates')
-    ov.querySelector('#lu-status').textContent = 'Checking for launcher update...'
-    ov.querySelector('#lu-bar').style.width = '0%'
-  })
-
-  // Step 2a: no update — proceed to game startup
-  api.onLauncherCheckDone(() => {
-    if (checkDone) return
-    checkDone = true
-    removeOverlay()
-    startup()
-    refreshStatus()
-    loadNews()
-  })
-
-  // Step 2b: update available — show download progress (stays blocking)
-  api.onLauncherUpdateAvailable((version) => {
-    const ov = getOverlay('Launcher Update Required')
-    ov.querySelector('#lu-status').textContent = `Downloading v${version}...`
-  })
-
+  // Download progress events (fires if an update is being downloaded)
   api.onLauncherUpdateProgress((data) => {
-    const ov = getOverlay()
-    if (data.phase) ov.querySelector('#lu-status').textContent = data.phase
+    if (data.phase) luStatus.textContent = data.phase
     const m = (data.phase || '').match(/(\d+)%/)
-    if (m) ov.querySelector('#lu-bar').style.width = m[1] + '%'
+    if (m) luBar.style.width = m[1] + '%'
   })
 
-  // Fallback: if neither event fires within 8s, proceed anyway
-  setTimeout(() => {
-    if (!checkDone) {
-      checkDone = true
-      removeOverlay()
+  // Pull-based: invoke main process and await the result directly.
+  // main resolves the promise once electron-updater finishes its check.
+  // No timing issues — the renderer asks, main answers whenever ready.
+  api.checkLauncherUpdate().then((result) => {
+    if (result.upToDate) {
+      overlay.remove()
       startup()
       refreshStatus()
       loadNews()
+    } else {
+      // Update found — download already running, progress events will update the bar
+      luStatus.textContent = `Downloading launcher v${result.version}...`
+      // Overlay stays until quitAndInstall() restarts the launcher
     }
-  }, 3000)
+  })
 })()
 
 // ---------------------------------------------------------------------------
