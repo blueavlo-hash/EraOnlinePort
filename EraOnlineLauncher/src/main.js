@@ -60,8 +60,14 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload    = true
   autoUpdater.autoInstallOnAppQuit = false
 
+  autoUpdater.on('checking-for-update', () => {
+    win?.webContents.send('launcher-checking-update')
+  })
   autoUpdater.on('update-available', (info) => {
     win?.webContents.send('launcher-update-available', info.version)
+  })
+  autoUpdater.on('update-not-available', () => {
+    win?.webContents.send('launcher-check-done')
   })
   autoUpdater.on('download-progress', (p) => {
     win?.webContents.send('launcher-update-progress', {
@@ -72,13 +78,18 @@ function setupAutoUpdater() {
     win?.webContents.send('launcher-update-progress', { phase: 'Installing...' })
     setTimeout(() => autoUpdater.quitAndInstall(true, true), 1500)
   })
-  autoUpdater.on('error', (err) => {
-    win?.webContents.send('launcher-update-error', err.message)
+  autoUpdater.on('error', () => {
+    // Can't reach update server — proceed anyway
+    win?.webContents.send('launcher-check-done')
   })
 
-  // Delay first check so window is ready
-  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 3000)
+  // Check immediately — renderer waits for result before starting game checks
+  autoUpdater.checkForUpdates().catch(() => {
+    win?.webContents.send('launcher-check-done')
+  })
 }
+
+ipcMain.handle('get-version', () => app.getVersion())
 
 // ---------------------------------------------------------------------------
 // IPC: window controls
@@ -196,7 +207,7 @@ ipcMain.handle('launch-game', async (_event, { username, token, serverAddress, s
   if (serverAddress) args.push('--server-address', serverAddress)
   if (serverPort)    args.push('--server-port',    String(serverPort))
 
-  const child = spawn(GAME_EXE, args, { detached: true, stdio: 'ignore' })
+  const child = spawn(GAME_EXE, args, { detached: true, stdio: 'ignore', cwd: INSTALL_DIR })
   child.unref()
   // Optionally hide launcher while game runs:
   // win?.hide()

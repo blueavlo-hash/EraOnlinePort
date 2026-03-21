@@ -5,13 +5,37 @@
 const api = window.launcher
 
 // ---------------------------------------------------------------------------
-// Background music
+// Background music + mute button
 // ---------------------------------------------------------------------------
 ;(function initMusic() {
   const music = document.getElementById('bg-music')
   if (!music) return
-  music.volume = 0.45
+  const saved = localStorage.getItem('eo_muted')
+  music.muted  = saved === 'true'
+  music.volume = 0.05
   music.play().catch(() => {})
+
+  // Inject mute button into titlebar
+  const titlebar = document.getElementById('titlebar')
+  if (titlebar) {
+    const btn = document.createElement('button')
+    btn.id = 'btn-mute'
+    btn.title = 'Toggle music'
+    btn.textContent = music.muted ? '🔇' : '🔊'
+    btn.style.cssText = `
+      background:transparent; border:none; color:#8c8270;
+      font-size:14px; cursor:pointer; padding:0 6px;
+      line-height:1; margin-right:2px;
+    `
+    btn.addEventListener('click', () => {
+      music.muted = !music.muted
+      btn.textContent = music.muted ? '🔇' : '🔊'
+      localStorage.setItem('eo_muted', music.muted)
+    })
+    // Insert before minimize button
+    const minBtn = document.getElementById('btn-minimize')
+    titlebar.insertBefore(btn, minBtn)
+  }
 })()
 
 // ---------------------------------------------------------------------------
@@ -265,8 +289,10 @@ async function startup() {
   _needsUpdate = result.needsUpdate
 
   const verTag = document.getElementById('version-tag')
-  if (verTag) verTag.textContent = result.installedVersion
-    ? `v${result.installedVersion}` : 'downloading...'
+  if (verTag) {
+    verTag.dataset.gameVersion = result.installedVersion || ''
+    _updateVersionTag()
+  }
 
   if (_needsUpdate) {
     await _autoInstall()
@@ -305,7 +331,10 @@ async function _autoInstall() {
   hideProgress()
   _needsUpdate = false
   const verTag = document.getElementById('version-tag')
-  if (verTag) verTag.textContent = `v${_manifest.version}`
+  if (verTag) {
+    verTag.dataset.gameVersion = _manifest.version
+    _updateVersionTag()
+  }
   setPlayBtn('play')
   toast('Era Online is ready!', 'success', 3000)
 }
@@ -389,64 +418,101 @@ document.getElementById('inp-username').addEventListener('input', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Launcher auto-update overlay (driven by electron-updater events)
+// Launcher auto-update overlay + boot sequencer
 // ---------------------------------------------------------------------------
 ;(function setupLauncherUpdateUI() {
-  let overlay = null
+  let overlay     = null
+  let checkDone   = false
 
-  function getOverlay() {
-    if (overlay) return overlay
-    overlay = document.createElement('div')
-    overlay.style.cssText = `
-      position: fixed; inset: 0; z-index: 9999;
-      background: rgba(8,5,2,0.97);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 18px;
-    `
-    overlay.innerHTML = `
-      <div style="color:#D9A626;font-size:15px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">
-        Launcher Update
-      </div>
-      <div id="lu-status" style="color:#c8b97a;font-size:12px;">Downloading update...</div>
-      <div style="width:340px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
-        <div id="lu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#8B5E0A,#D9A626);border-radius:3px;transition:width 0.3s;"></div>
-      </div>
-    `
-    document.body.appendChild(overlay)
+  // Blocking overlay used for both "checking" and "downloading" states
+  function getOverlay(title) {
+    if (!overlay) {
+      overlay = document.createElement('div')
+      overlay.style.cssText = `
+        position: fixed; inset: 0; z-index: 9999;
+        background: rgba(8,5,2,0.97);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 18px;
+      `
+      overlay.innerHTML = `
+        <div style="color:#D9A626;font-size:15px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">
+          ${title || 'Era Online Launcher'}
+        </div>
+        <div id="lu-status" style="color:#c8b97a;font-size:12px;"></div>
+        <div style="width:340px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+          <div id="lu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#8B5E0A,#D9A626);border-radius:3px;transition:width 0.3s;"></div>
+        </div>
+      `
+      document.body.appendChild(overlay)
+    }
     return overlay
   }
 
+  function removeOverlay() {
+    overlay?.remove()
+    overlay = null
+  }
+
+  // Step 1: checking — block the entire UI immediately
+  api.onLauncherCheckingUpdate(() => {
+    const ov = getOverlay('Checking for Updates')
+    ov.querySelector('#lu-status').textContent = 'Checking for launcher update...'
+    ov.querySelector('#lu-bar').style.width = '0%'
+  })
+
+  // Step 2a: no update — proceed to game startup
+  api.onLauncherCheckDone(() => {
+    if (checkDone) return
+    checkDone = true
+    removeOverlay()
+    startup()
+    refreshStatus()
+    loadNews()
+  })
+
+  // Step 2b: update available — show download progress (stays blocking)
   api.onLauncherUpdateAvailable((version) => {
-    setPlayBtn('checking')
-    playBtn.textContent = 'Updating...'
-    const ov = getOverlay()
-    ov.querySelector('#lu-status').textContent = `Downloading update v${version}...`
+    const ov = getOverlay('Launcher Update Required')
+    ov.querySelector('#lu-status').textContent = `Downloading v${version}...`
   })
 
   api.onLauncherUpdateProgress((data) => {
     const ov = getOverlay()
-    const statusEl = ov.querySelector('#lu-status')
-    const barEl    = ov.querySelector('#lu-bar')
-    if (data.phase) statusEl.textContent = data.phase
+    if (data.phase) ov.querySelector('#lu-status').textContent = data.phase
     const m = (data.phase || '').match(/(\d+)%/)
-    if (m) barEl.style.width = m[1] + '%'
+    if (m) ov.querySelector('#lu-bar').style.width = m[1] + '%'
   })
 
-  api.onLauncherUpdateError((err) => {
-    if (!overlay) return
-    overlay.querySelector('#lu-status').textContent = 'Update failed — will retry next launch.'
-    overlay.querySelector('#lu-bar').style.width = '0%'
-    setTimeout(() => { overlay?.remove(); overlay = null }, 4000)
-  })
+  // Fallback: if neither event fires within 8s, proceed anyway
+  setTimeout(() => {
+    if (!checkDone) {
+      checkDone = true
+      removeOverlay()
+      startup()
+      refreshStatus()
+      loadNews()
+    }
+  }, 8000)
 })()
 
 // ---------------------------------------------------------------------------
-// Boot
+// Boot — show launcher version
 // ---------------------------------------------------------------------------
-startup()
-refreshStatus()
-loadNews()
+let _launcherVersion = ''
+api.getVersion().then(v => {
+  _launcherVersion = v
+  _updateVersionTag()
+})
+
+function _updateVersionTag() {
+  const verTag = document.getElementById('version-tag')
+  if (!verTag) return
+  const parts = []
+  if (verTag.dataset.gameVersion) parts.push('Game ' + verTag.dataset.gameVersion)
+  if (_launcherVersion)           parts.push('Launcher v' + _launcherVersion)
+  verTag.textContent = parts.length ? parts.join(' | ') : ''
+}
 
 // Refresh server status every 30s
 setInterval(refreshStatus, 30000)
