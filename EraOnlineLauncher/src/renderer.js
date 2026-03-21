@@ -34,7 +34,7 @@ const api = window.launcher
     })
     // Insert before minimize button
     const minBtn = document.getElementById('btn-minimize')
-    titlebar.insertBefore(btn, minBtn)
+    minBtn.parentNode.insertBefore(btn, minBtn)
   }
 })()
 
