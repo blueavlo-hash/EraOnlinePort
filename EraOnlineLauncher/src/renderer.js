@@ -461,27 +461,40 @@ document.getElementById('inp-username').addEventListener('input', () => {
     if (m) luBar.style.width = m[1] + '%'
   })
 
-  // Pull-based: invoke main process and await the result directly.
-  // main resolves the promise once electron-updater finishes its check.
-  // No timing issues — the renderer asks, main answers whenever ready.
-  api.checkLauncherUpdate().then((result) => {
-    if (result.upToDate) {
-      overlay.remove()
-      startup()
-      refreshStatus()
-      loadNews()
-    } else {
-      // Update found — download running in main, progress events will update the bar
-      luStatus.textContent = `Downloading launcher v${result.version}...`
-      // Overlay stays until the launcher restarts after install
-    }
-  }).catch(() => {
-    // IPC failed for any reason — proceed anyway
+  // Absolute renderer-side fallback — if ANYTHING goes wrong for ANY reason,
+  // the overlay is removed after 12s and the launcher proceeds normally.
+  const absoluteFallback = setTimeout(() => {
+    console.warn('[boot] absolute fallback fired — proceeding without update check')
     overlay.remove()
     startup()
     refreshStatus()
     loadNews()
-  })
+  }, 12000)
+
+  function proceed(result) {
+    clearTimeout(absoluteFallback)
+    if (result && !result.upToDate) {
+      luStatus.textContent = `Downloading launcher v${result.version}...`
+      return // overlay stays until launcher restarts
+    }
+    overlay.remove()
+    startup()
+    refreshStatus()
+    loadNews()
+  }
+
+  // Wrap in try/catch: if api.checkLauncherUpdate is undefined (old preload
+  // cached from a previous install), it throws synchronously and .catch() on
+  // the promise chain won't catch it.
+  try {
+    api.checkLauncherUpdate().then(proceed).catch((err) => {
+      console.error('[boot] checkLauncherUpdate rejected:', err)
+      proceed({ upToDate: true })
+    })
+  } catch (err) {
+    console.error('[boot] checkLauncherUpdate threw:', err)
+    proceed({ upToDate: true })
+  }
 })()
 
 // ---------------------------------------------------------------------------
