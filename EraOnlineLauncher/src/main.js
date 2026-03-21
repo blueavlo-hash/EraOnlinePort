@@ -15,7 +15,7 @@ const SERVER_STATUS_URL = 'http://127.0.0.1:6970/status'
 const INSTALL_DIR  = path.join(app.getPath('appData'), 'EraOnline')
 const GAME_EXE     = path.join(INSTALL_DIR, 'EraOnline.exe')
 const VERSION_FILE = path.join(INSTALL_DIR, 'version.txt')
-const LAUNCHER_VERSION = '1.0.1'  // bump this with each launcher release
+const LAUNCHER_VERSION = '1.0.0'  // bump this with each launcher release
 
 let win = null
 
@@ -59,37 +59,29 @@ ipcMain.handle('install-launcher-update', async (_event, downloadUrl) => {
   try {
     win?.webContents.send('launcher-update-progress', { phase: 'Downloading launcher update...' })
 
-    const tmpZip  = path.join(os.tmpdir(), 'EraOnlineLauncher-update.zip')
-    const tmpDir  = path.join(os.tmpdir(), 'EraOnlineLauncher-update')
-    const exeDir  = path.dirname(process.execPath)
+    const tmpExe = path.join(os.tmpdir(), 'EraOnlineLauncher-Setup.exe')
 
-    // Download
+    // Download the NSIS installer
     const data = await downloadWithProgress(downloadUrl, (received, total) => {
       const pct = total > 0 ? Math.round(received / total * 100) : 0
       win?.webContents.send('launcher-update-progress', {
         phase: `Downloading launcher... ${pct}%`
       })
     })
-    fs.writeFileSync(tmpZip, data)
+    fs.writeFileSync(tmpExe, data)
 
-    // Extract to temp dir
-    win?.webContents.send('launcher-update-progress', { phase: 'Extracting...' })
-    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true })
-    await extractZip(tmpZip, tmpDir)
-    fs.unlinkSync(tmpZip)
+    win?.webContents.send('launcher-update-progress', { phase: 'Installing...' })
 
-    // The zip contains an EraOnlineLauncher subfolder — point to it
-    const extractedApp = path.join(tmpDir, 'EraOnlineLauncher')
-    const srcDir = fs.existsSync(extractedApp) ? extractedApp : tmpDir
-
-    // Write an updater batch script that runs after we exit
+    // Write a bat that: waits for us to exit, runs the silent installer, relaunches
+    const exePath = process.execPath
     const batPath = path.join(os.tmpdir(), 'eo_launcher_update.bat')
     const batContent = [
       '@echo off',
       'timeout /t 2 /nobreak >nul',
-      `xcopy /E /Y /I "${srcDir}\\*" "${exeDir}\\"`,
-      `start "" "${path.join(exeDir, 'Era Online Launcher.exe')}"`,
-      `rmdir /S /Q "${tmpDir}"`,
+      `"${tmpExe}" /S`,
+      'timeout /t 5 /nobreak >nul',
+      `start "" "${exePath}"`,
+      `del "${tmpExe}"`,
       'del "%~0"',
     ].join('\r\n')
     fs.writeFileSync(batPath, batContent)
