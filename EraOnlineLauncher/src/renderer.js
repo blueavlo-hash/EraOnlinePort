@@ -144,11 +144,7 @@ function setPlayBtn(state) {
       break
     case 'downloading':
       playBtn.disabled = true
-      playBtn.textContent = 'Updating...'
-      break
-    case 'update':
-      playBtn.disabled = false
-      playBtn.textContent = 'Update'
+      playBtn.textContent = 'Downloading...'
       break
     case 'play':
       playBtn.disabled = false
@@ -158,6 +154,10 @@ function setPlayBtn(state) {
     case 'launching':
       playBtn.disabled = true
       playBtn.textContent = 'Launching...'
+      break
+    case 'error':
+      playBtn.disabled = false
+      playBtn.textContent = 'Retry'
       break
   }
 }
@@ -240,7 +240,7 @@ async function loadNews() {
 }
 
 // ---------------------------------------------------------------------------
-// Startup: check for updates
+// Startup: check + auto-install if needed
 // ---------------------------------------------------------------------------
 async function startup() {
   setPlayBtn('checking')
@@ -250,15 +250,13 @@ async function startup() {
   const result = await api.checkUpdate()
 
   if (!result.ok) {
-    // Can't reach manifest — if game is installed, let them play anyway
     hideProgress()
     if (result.installedVersion) {
       setPlayBtn('play')
-      toast('Could not check for updates. Playing offline cached version.', 'error')
+      toast('Could not reach update server. Playing installed version.', 'error')
     } else {
-      setPlayBtn('checking')
-      playBtn.textContent = 'No Connection'
-      toast('Could not reach update server. Check your connection.', 'error')
+      setPlayBtn('error')
+      toast('No connection. Check your internet and retry.', 'error')
     }
     return
   }
@@ -266,54 +264,52 @@ async function startup() {
   _manifest    = result.manifest
   _needsUpdate = result.needsUpdate
 
-  // Update version display
   const verTag = document.getElementById('version-tag')
-  if (verTag) verTag.textContent =
-    result.installedVersion ? `installed: ${result.installedVersion}` : 'not installed'
-
-  hideProgress()
+  if (verTag) verTag.textContent = result.installedVersion
+    ? `v${result.installedVersion}` : 'downloading...'
 
   if (_needsUpdate) {
-    const label = result.installedVersion
-      ? `Update available: ${result.installedVersion} → ${result.manifest.version}`
-      : `Download required: ${result.manifest.version}`
-    toast(label, 'info', 6000)
-    setPlayBtn('update')
+    await _autoInstall()
   } else {
+    hideProgress()
     setPlayBtn('play')
   }
 }
 
+async function _autoInstall() {
+  _isDownloading = true
+  setPlayBtn('downloading')
+  setProgress(0, _manifest.installedVersion
+    ? `Updating to ${_manifest.version}...`
+    : `Downloading Era Online ${_manifest.version}...`)
+
+  const result = await api.installUpdate(_manifest)
+  _isDownloading = false
+
+  if (!result.ok) {
+    hideProgress()
+    setPlayBtn('error')
+    toast('Download failed: ' + result.error + ' — click Retry.', 'error', 8000)
+    return
+  }
+
+  hideProgress()
+  _needsUpdate = false
+  const verTag = document.getElementById('version-tag')
+  if (verTag) verTag.textContent = `v${_manifest.version}`
+  setPlayBtn('play')
+  toast('Era Online is up to date!', 'success', 3000)
+}
+
 // ---------------------------------------------------------------------------
-// Play / Update button
+// Play button (launch only — updates are automatic)
 // ---------------------------------------------------------------------------
 playBtn.addEventListener('click', async () => {
   if (_isDownloading) return
 
+  // Retry after failed download
   if (_needsUpdate && _manifest) {
-    // Download & install
-    _isDownloading = true
-    setPlayBtn('downloading')
-    setProgress(0, 'Starting download...')
-    progWrap.classList.add('visible')
-
-    const result = await api.installUpdate(_manifest)
-    _isDownloading = false
-
-    if (!result.ok) {
-      hideProgress()
-      setPlayBtn('update')
-      toast('Update failed: ' + result.error, 'error')
-      return
-    }
-
-    hideProgress()
-    _needsUpdate = false
-    toast('Update installed successfully!', 'success')
-    setPlayBtn('play')
-
-    // Update version tag
-    document.getElementById('version-tag').textContent = 'installed: ' + _manifest.version
+    await _autoInstall()
     return
   }
 
