@@ -264,7 +264,8 @@ async function startup() {
   hideProgress()
 
   if (result.launcherNeedsUpdate && result.launcherDownload) {
-    showLauncherUpdateBanner(result.launcherDownload)
+    await forcedLauncherUpdate(result.launcherDownload)
+    return  // after update the app quits — this line is a safety fallback
   }
 
   if (_needsUpdate) {
@@ -371,59 +372,64 @@ document.getElementById('inp-username').addEventListener('input', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Launcher self-update banner
+// Launcher forced self-update (blocking overlay, auto-starts)
 // ---------------------------------------------------------------------------
-function showLauncherUpdateBanner(downloadUrl) {
-  // Inject a banner above the bottom area
-  const banner = document.createElement('div')
-  banner.id = 'launcher-update-banner'
-  banner.style.cssText = `
-    background: rgba(20,12,2,0.95);
-    border: 1px solid #D9A626;
-    border-radius: 4px;
-    padding: 8px 14px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 0;
+async function forcedLauncherUpdate(downloadUrl) {
+  // Lock the play button — nothing works until updated
+  setPlayBtn('checking')
+  playBtn.textContent = 'Update Required'
+
+  // Full-screen blocking overlay
+  const overlay = document.createElement('div')
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(8,5,2,0.97);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 18px;
   `
-  banner.innerHTML = `
-    <span style="color:#f0c040;font-size:12px;flex:1">
-      &#x2605; Launcher update available — restart after install
-    </span>
-    <button id="btn-update-launcher" style="
-      background:linear-gradient(180deg,rgba(120,80,10,0.8),rgba(60,38,5,0.9));
-      border:1px solid #D9A626; border-radius:4px; color:#f0c040;
-      padding:4px 14px; font-size:12px; cursor:pointer; white-space:nowrap;
-    ">Update Launcher</button>
-    <button id="btn-dismiss-launcher-update" style="
-      background:transparent; border:none; color:#8c8270;
-      font-size:14px; cursor:pointer; padding:0 4px;
-    ">&#x2715;</button>
+  overlay.innerHTML = `
+    <div style="color:#D9A626;font-size:15px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">
+      Launcher Update Required
+    </div>
+    <div id="lu-status" style="color:#c8b97a;font-size:12px;">Downloading update...</div>
+    <div style="width:340px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+      <div id="lu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#8B5E0A,#D9A626);border-radius:3px;transition:width 0.2s;"></div>
+    </div>
+    <div id="lu-error" style="color:#c0392b;font-size:11px;display:none;"></div>
   `
-  const app = document.getElementById('app')
-  const bottom = document.getElementById('bottom-area')
-  app.insertBefore(banner, bottom)
+  document.body.appendChild(overlay)
 
-  document.getElementById('btn-dismiss-launcher-update').addEventListener('click', () => banner.remove())
+  const statusEl = overlay.querySelector('#lu-status')
+  const barEl    = overlay.querySelector('#lu-bar')
+  const errEl    = overlay.querySelector('#lu-error')
 
-  document.getElementById('btn-update-launcher').addEventListener('click', async () => {
-    const btn = document.getElementById('btn-update-launcher')
-    btn.disabled = true
-    btn.textContent = 'Downloading...'
-
-    api.onLauncherUpdateProgress((data) => {
-      if (btn) btn.textContent = data.phase || 'Updating...'
-    })
-
-    const result = await api.installLauncherUpdate(downloadUrl)
-    if (!result.ok) {
-      toast('Launcher update failed: ' + result.error, 'error')
-      btn.disabled = false
-      btn.textContent = 'Update Launcher'
-    }
-    // On success, app.quit() is called by main — launcher closes and restarts
+  api.onLauncherUpdateProgress((data) => {
+    if (data.phase) statusEl.textContent = data.phase
+    // parse "Downloading launcher... 42%" for bar
+    const m = (data.phase || '').match(/(\d+)%/)
+    if (m) barEl.style.width = m[1] + '%'
   })
+
+  const result = await api.installLauncherUpdate(downloadUrl)
+
+  if (!result.ok) {
+    statusEl.textContent = 'Update failed — retrying in 10 seconds...'
+    errEl.textContent = result.error
+    errEl.style.display = 'block'
+    barEl.style.width = '0%'
+    // Retry once after 10s
+    await new Promise(r => setTimeout(r, 10000))
+    statusEl.textContent = 'Retrying...'
+    errEl.style.display = 'none'
+    const retry = await api.installLauncherUpdate(downloadUrl)
+    if (!retry.ok) {
+      statusEl.textContent = 'Update failed. Please reinstall the launcher.'
+      errEl.textContent = retry.error
+      errEl.style.display = 'block'
+    }
+  }
+  // On success, app.quit() is called by main — launcher closes and restarts
 }
 
 // ---------------------------------------------------------------------------

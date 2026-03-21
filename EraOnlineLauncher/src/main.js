@@ -15,7 +15,7 @@ const SERVER_STATUS_URL = 'http://127.0.0.1:6970/status'
 const INSTALL_DIR  = path.join(app.getPath('appData'), 'EraOnline')
 const GAME_EXE     = path.join(INSTALL_DIR, 'EraOnline.exe')
 const VERSION_FILE = path.join(INSTALL_DIR, 'version.txt')
-const LAUNCHER_VERSION = '1.0.1'  // bump this with each launcher release
+const LAUNCHER_VERSION = '1.0.0'  // bump this with each launcher release
 
 let win = null
 
