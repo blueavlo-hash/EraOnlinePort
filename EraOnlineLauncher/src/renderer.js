@@ -293,12 +293,21 @@ async function _autoInstall() {
     return
   }
 
+  // Verify the exe actually landed (antivirus can silently remove it)
+  const verify = await api.verifyInstall()
+  if (!verify.installed) {
+    hideProgress()
+    setPlayBtn('error')
+    toast('Game files were blocked — check Windows Defender exclusions for %APPDATA%\\EraOnline, then click Retry.', 'error', 12000)
+    return
+  }
+
   hideProgress()
   _needsUpdate = false
   const verTag = document.getElementById('version-tag')
   if (verTag) verTag.textContent = `v${_manifest.version}`
   setPlayBtn('play')
-  toast('Era Online is up to date!', 'success', 3000)
+  toast('Era Online is ready!', 'success', 3000)
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +338,12 @@ playBtn.addEventListener('click', async () => {
   })
 
   if (!result.ok) {
+    if (!result.ok && result.error && result.error.includes('not installed')) {
+      // Exe is missing — re-download automatically
+      _needsUpdate = true
+      await _autoInstall()
+      return
+    }
     setPlayBtn('play')
     toast('Launch failed: ' + result.error, 'error')
     return

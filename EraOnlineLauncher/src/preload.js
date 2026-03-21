@@ -7,7 +7,8 @@ contextBridge.exposeInMainWorld('launcher', {
   openUrl:  (url)    => ipcRenderer.send('open-url', url),
 
   // Game lifecycle
-  checkUpdate:   ()         => ipcRenderer.invoke('check-update'),
+  checkUpdate:    ()         => ipcRenderer.invoke('check-update'),
+  verifyInstall:  ()         => ipcRenderer.invoke('verify-install'),
   installUpdate: (manifest) => ipcRenderer.invoke('install-update', manifest),
   launchGame:    (opts)     => ipcRenderer.invoke('launch-game', opts),
   getServerStatus: ()       => ipcRenderer.invoke('get-server-status'),

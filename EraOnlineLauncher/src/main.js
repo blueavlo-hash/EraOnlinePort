@@ -160,10 +160,22 @@ ipcMain.handle('install-update', async (_event, manifest) => {
     // Write version marker
     fs.writeFileSync(VERSION_FILE, manifest.version, 'utf8')
 
+    // Verify the exe is actually there (antivirus can silently remove it)
+    if (!fs.existsSync(GAME_EXE)) {
+      return { ok: false, error: 'EraOnline.exe was not found after installation. It may have been blocked by antivirus — try adding an exclusion for ' + INSTALL_DIR }
+    }
+
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e.message }
   }
+})
+
+// ---------------------------------------------------------------------------
+// IPC: verify game install (for post-install check)
+// ---------------------------------------------------------------------------
+ipcMain.handle('verify-install', () => {
+  return { installed: fs.existsSync(GAME_EXE) }
 })
 
 // ---------------------------------------------------------------------------
