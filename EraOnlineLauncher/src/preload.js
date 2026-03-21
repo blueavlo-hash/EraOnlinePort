@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('launcher', {
   verifyInstall:  ()         => ipcRenderer.invoke('verify-install'),
   installUpdate: (manifest) => ipcRenderer.invoke('install-update', manifest),
   launchGame:    (opts)     => ipcRenderer.invoke('launch-game', opts),
-  getServerStatus: ()       => ipcRenderer.invoke('get-server-status'),
+  getServerStatus: (h, p)   => ipcRenderer.invoke('get-server-status', h, p),
   getNews:         ()       => ipcRenderer.invoke('get-news'),
 
   // Game download progress

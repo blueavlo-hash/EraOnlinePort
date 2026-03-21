@@ -4,15 +4,15 @@ const path = require('path')
 const fs = require('fs')
 const https = require('https')
 const http = require('http')
+const net = require('net')
 const { spawn } = require('child_process')
 const os = require('os')
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const MANIFEST_URL      = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/latest.json'
-const NEWS_URL          = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/news.json'
-const SERVER_STATUS_URL = 'http://127.0.0.1:6970/status'
+const MANIFEST_URL = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/latest.json'
+const NEWS_URL     = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/news.json'
 const INSTALL_DIR  = path.join(app.getPath('appData'), 'EraOnline')
 const GAME_EXE     = path.join(INSTALL_DIR, 'EraOnline.exe')
 const VERSION_FILE = path.join(INSTALL_DIR, 'version.txt')
@@ -221,15 +221,24 @@ ipcMain.handle('launch-game', async (_event, { username, token, serverAddress, s
 })
 
 // ---------------------------------------------------------------------------
-// IPC: server status
+// IPC: server status — TCP reachability check on the game port
 // ---------------------------------------------------------------------------
-ipcMain.handle('get-server-status', async () => {
-  try {
-    const data = await fetchJson(SERVER_STATUS_URL)
-    return { ok: true, online: true, players: data.players ?? 0, max: data.max ?? 0 }
-  } catch {
-    return { ok: true, online: false, players: 0, max: 0 }
-  }
+ipcMain.handle('get-server-status', (_event, host, port) => {
+  return new Promise((resolve) => {
+    const socket = new net.Socket()
+    let done = false
+    const finish = (online) => {
+      if (done) return
+      done = true
+      socket.destroy()
+      resolve({ ok: true, online, players: 0, max: 0 })
+    }
+    socket.setTimeout(3000)
+    socket.once('connect',  () => finish(true))
+    socket.once('error',    () => finish(false))
+    socket.once('timeout',  () => finish(false))
+    socket.connect(port || 7777, host || '127.0.0.1')
+  })
 })
 
 // ---------------------------------------------------------------------------

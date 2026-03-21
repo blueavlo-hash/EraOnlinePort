@@ -211,11 +211,21 @@ async function refreshStatus() {
   const text  = document.getElementById('status-text')
   const extra = document.getElementById('status-extra')
 
-  const result = await api.getServerStatus()
+  // Show offline immediately so we never appear stuck on "Checking..."
+  dot.className = 'offline'
+  text.textContent = 'Offline'
+  extra.textContent = 'Checking...'
+
+  const addr = document.getElementById('inp-server-addr').value.trim() || '127.0.0.1'
+  const port = parseInt(document.getElementById('server-port-input').value.trim()) || 7777
+
+  const result = await api.getServerStatus(addr, port)
   if (result.online) {
     dot.className = 'online'
     text.textContent = 'Online'
-    extra.textContent = result.players + ' / ' + result.max + ' players'
+    extra.textContent = result.players > 0
+      ? result.players + ' / ' + result.max + ' players'
+      : 'Server is up'
   } else {
     dot.className = 'offline'
     text.textContent = 'Offline'
