@@ -1,0 +1,39 @@
+{
+  "name": "era-online-launcher",
+  "version": "1.0.0",
+  "description": "Era Online Game Launcher",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64",
+    "build:dir": "electron-builder --win --x64 --dir"
+  },
+  "build": {
+    "appId": "com.eraonline.launcher",
+    "productName": "Era Online Launcher",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "shortcutName": "Era Online"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": []
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "^26.8.1"
+  }
+}

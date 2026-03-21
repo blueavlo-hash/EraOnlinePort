@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+<title>Era Online</title>
+<style>
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --gold:       #D9A626;
+  --gold-dim:   #8a6310;
+  --gold-bright:#f0c040;
+  --border:     #664D1E;
+  --bg-panel:   rgba(13, 8, 2, 0.88);
+  --bg-input:   rgba(8, 5, 1, 0.80);
+  --text:       #E6D9B8;
+  --text-dim:   #8c8270;
+  --red:        #6b1e1a;
+  --green:      #2a5c1e;
+  --green-bright: #4caf50;
+  --radius:     4px;
+}
+
+html, body {
+  width: 960px; height: 580px;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: #0d0a05;
+  user-select: none;
+}
+
+/* ============================================================
+   BACKGROUND
+   ============================================================ */
+#bg {
+  position: fixed; inset: 0;
+  background-image: url('../assets/mainmenu.png');
+  background-size: 75%;
+  background-position: center;
+  background-repeat: no-repeat;
+  animation: kenburns 40s ease-in-out infinite alternate;
+  filter: brightness(0.45);
+  z-index: 0;
+}
+
+@keyframes kenburns {
+  0%   { transform: scale(1.0)  translate(0%, 0%); }
+  25%  { transform: scale(1.03) translate(-1%, -0.5%); }
+  50%  { transform: scale(1.05) translate(0.5%, -1%); }
+  75%  { transform: scale(1.03) translate(-0.5%, 0.8%); }
+  100% { transform: scale(1.0)  translate(0%, 0%); }
+}
+
+/* vignette */
+#bg::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.65) 100%);
+}
+
+/* ============================================================
+   PARTICLE CANVAS
+   ============================================================ */
+#particles {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ============================================================
+   TITLEBAR (draggable)
+   ============================================================ */
+#titlebar {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: 32px;
+  -webkit-app-region: drag;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 8px;
+  z-index: 100;
+}
+#titlebar-controls {
+  display: flex; gap: 6px;
+  -webkit-app-region: no-drag;
+}
+.tb-btn {
+  width: 28px; height: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 2px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.tb-btn:hover { background: rgba(212,166,38,0.15); color: var(--gold); }
+.tb-btn.close:hover { background: rgba(180,30,20,0.5); color: #fff; border-color: #a33; }
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+#app {
+  position: relative; z-index: 10;
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  padding: 36px 32px 20px;
+  gap: 12px;
+}
+
+/* ============================================================
+   LOGO
+   ============================================================ */
+#logo-area {
+  display: none;
+}
+#logo-title {
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, var(--gold-bright) 0%, var(--gold) 50%, var(--gold-dim) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 4s linear infinite;
+  background-size: 200% auto;
+  text-shadow: none;
+  filter: drop-shadow(0 0 12px rgba(217,166,38,0.4));
+}
+@keyframes shimmer {
+  0%   { background-position: 0% center; }
+  100% { background-position: 200% center; }
+}
+#logo-sub {
+  font-size: 11px;
+  letter-spacing: 4px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ============================================================
+   MAIN CONTENT ROW
+   ============================================================ */
+#content-row {
+  flex: 1;
+  display: flex;
+  gap: 14px;
+  min-height: 0;
+}
+
+/* ============================================================
+   PANEL BASE
+   ============================================================ */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.panel-title {
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--gold);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+/* ============================================================
+   LEFT: LOGIN + SERVER STATUS
+   ============================================================ */
+#left-col {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Login form */
+#login-panel { flex-shrink: 0; }
+
+.field-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  letter-spacing: 1px;
+}
+.field-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+  margin-bottom: 8px;
+}
+.field-input:focus { border-color: var(--gold-dim); }
+.field-input::placeholder { color: var(--text-dim); opacity: 0.5; }
+
+#remember-row {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 10px;
+  font-size: 11px; color: var(--text-dim);
+  cursor: pointer;
+}
+#remember-row input { accent-color: var(--gold); cursor: pointer; }
+
+/* Server status panel */
+#status-panel { flex-shrink: 0; }
+#status-row {
+  display: flex; align-items: center; gap: 8px;
+}
+#status-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #555;
+  flex-shrink: 0;
+  transition: background 0.4s;
+}
+#status-dot.online  { background: var(--green-bright); box-shadow: 0 0 6px var(--green-bright); animation: pulse-dot 2s infinite; }
+#status-dot.offline { background: #a33; }
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+#status-text  { font-size: 12px; color: var(--text); }
+#status-extra { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+/* Server address (advanced) */
+#server-toggle {
+  font-size: 10px; color: var(--gold-dim);
+  cursor: pointer; text-decoration: underline;
+  margin-top: 8px; display: block;
+  letter-spacing: 1px;
+}
+#server-toggle:hover { color: var(--gold); }
+#server-advanced { display: none; margin-top: 8px; }
+#server-advanced.open { display: block; }
+#server-addr-row { display: flex; gap: 6px; }
+#server-addr-row .field-input { flex: 1; margin-bottom: 0; }
+#server-port-input { width: 58px !important; flex-shrink: 0; }
+
+/* ============================================================
+   RIGHT: NEWS
+   ============================================================ */
+#right-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+#news-panel {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#news-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+#news-list::-webkit-scrollbar { width: 4px; }
+#news-list::-webkit-scrollbar-track { background: transparent; }
+#news-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.news-item { margin-bottom: 14px; }
+.news-date  { font-size: 10px; color: var(--gold-dim); letter-spacing: 1px; margin-bottom: 3px; }
+.news-title { font-size: 13px; color: var(--gold); margin-bottom: 4px; font-weight: 600; }
+.news-body  { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.news-divider { border: none; border-top: 1px solid rgba(102,77,30,0.4); margin: 10px 0; }
+
+/* ============================================================
+   BOTTOM: PLAY AREA
+   ============================================================ */
+#bottom-area {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Progress bar */
+#progress-wrap {
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+}
+#progress-wrap.visible { display: flex; }
+#progress-bar-bg {
+  width: 100%;
+  height: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+#progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold-dim), var(--gold));
+  border-radius: 4px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+#progress-label {
+  font-size: 10px; color: var(--text-dim); letter-spacing: 1px;
+}
+
+/* Play / Update button */
+#play-btn {
+  min-width: 160px;
+  height: 48px;
+  padding: 0 24px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1px solid var(--gold-dim);
+  background: linear-gradient(180deg, rgba(120,80,10,0.7) 0%, rgba(60,38,5,0.85) 100%);
+  color: var(--gold-bright);
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+#play-btn::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 60%);
+  pointer-events: none;
+}
+#play-btn:not(:disabled):hover {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(160,110,15,0.8) 0%, rgba(90,58,8,0.9) 100%);
+  box-shadow: 0 0 16px rgba(217,166,38,0.3), 0 0 4px rgba(217,166,38,0.5);
+  color: #fff;
+}
+#play-btn:not(:disabled):active {
+  transform: translateY(1px);
+  box-shadow: 0 0 8px rgba(217,166,38,0.2);
+}
+#play-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+#play-btn.pulse:not(:disabled) {
+  animation: play-pulse 2.5s ease-in-out infinite;
+}
+@keyframes play-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(217,166,38,0.2); }
+  50%       { box-shadow: 0 0 22px rgba(217,166,38,0.5), 0 0 6px rgba(217,166,38,0.6); }
+}
+
+/* Footer links */
+#footer-links {
+  display: flex; gap: 14px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.footer-link {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.footer-link:hover { color: var(--gold); }
+
+/* ============================================================
+   VERSION TAG
+   ============================================================ */
+#version-tag {
+  position: fixed; bottom: 6px; left: 12px;
+  font-size: 11px; color: var(--text); letter-spacing: 1px;
+  z-index: 50;
+  background: rgba(0,0,0,0.55);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+/* ============================================================
+   TOAST NOTIFICATIONS
+   ============================================================ */
+#toast-area {
+  position: fixed; bottom: 28px; right: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  z-index: 200;
+}
+.toast {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--text);
+  max-width: 260px;
+  animation: toast-in 0.25s ease;
+}
+.toast.error  { border-color: #7a2020; color: #ff8080; }
+.toast.success { border-color: #2a6020; color: #80ff80; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+</style>
+</head>
+<body>
+
+<!-- Background -->
+<div id="bg"></div>
+<canvas id="particles"></canvas>
+
+<!-- Titlebar -->
+<div id="titlebar">
+  <div id="titlebar-controls">
+    <button class="tb-btn" id="btn-minimize" title="Minimize">&#x2013;</button>
+    <button class="tb-btn close" id="btn-close" title="Close">&#x2715;</button>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app">
+
+  <!-- Logo -->
+  <div id="logo-area">
+  </div>
+
+  <!-- Content row -->
+  <div id="content-row">
+
+    <!-- Left: login + status -->
+    <div id="left-col">
+
+      <div class="panel" id="login-panel">
+        <div class="panel-title">Account</div>
+        <div class="field-label">Username</div>
+        <input class="field-input" id="inp-username" type="text" placeholder="Username" autocomplete="off" spellcheck="false">
+        <div class="field-label">Password</div>
+        <input class="field-input" id="inp-password" type="password" placeholder="Password" autocomplete="off">
+        <label id="remember-row">
+          <input type="checkbox" id="chk-remember"> Remember me
+        </label>
+      </div>
+
+      <div class="panel" id="status-panel">
+        <div class="panel-title">Server</div>
+        <div id="status-row">
+          <div id="status-dot"></div>
+          <div id="status-text">Checking...</div>
+        </div>
+        <div id="status-extra"></div>
+        <span id="server-toggle">&#x25B8; Custom server</span>
+        <div id="server-advanced">
+          <div class="field-label" style="margin-bottom:4px">Address &amp; Port</div>
+          <div id="server-addr-row">
+            <input class="field-input" id="inp-server-addr" type="text" value="127.0.0.1" spellcheck="false">
+            <input class="field-input" id="server-port-input" type="text" value="6969">
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right: news -->
+    <div id="right-col">
+      <div class="panel" id="news-panel">
+        <div class="panel-title">News &amp; Updates</div>
+        <div id="news-list">
+          <div class="news-item" style="color:var(--text-dim);font-size:11px">Loading news...</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom: progress + play + links -->
+  <div id="bottom-area">
+    <div id="progress-wrap">
+      <div id="progress-bar-bg"><div id="progress-bar-fill"></div></div>
+      <div id="progress-label">Checking for updates...</div>
+    </div>
+    <button id="play-btn" disabled>Play</button>
+    <div id="footer-links">
+      <a class="footer-link" id="link-discord">Discord</a>
+      <a class="footer-link" id="link-website">Website</a>
+    </div>
+  </div>
+
+</div>
+
+<!-- Version tag -->
+<div id="version-tag">v0.5.0-alpha</div>
+
+<!-- Toast area -->
+<div id="toast-area"></div>
+
+<script src="renderer.js"></script>
+</body>
+</html>
