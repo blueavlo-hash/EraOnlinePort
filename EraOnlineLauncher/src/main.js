@@ -88,7 +88,7 @@ ipcMain.handle('install-launcher-update', async (_event, downloadUrl) => {
       '@echo off',
       'timeout /t 2 /nobreak >nul',
       `xcopy /E /Y /I "${srcDir}\\*" "${exeDir}\\"`,
-      `start "" "${path.join(exeDir, 'EraOnlineLauncher.exe')}"`,
+      `start "" "${path.join(exeDir, 'Era Online Launcher.exe')}"`,
       `rmdir /S /Q "${tmpDir}"`,
       'del "%~0"',
     ].join('\r\n')
