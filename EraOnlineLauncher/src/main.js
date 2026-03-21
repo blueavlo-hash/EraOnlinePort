@@ -1,9 +1,10 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const fs = require('fs')
 const https = require('https')
 const http = require('http')
-const { spawn, execFile } = require('child_process')
+const { spawn } = require('child_process')
 const os = require('os')
 
 // ---------------------------------------------------------------------------
@@ -15,7 +16,6 @@ const SERVER_STATUS_URL = 'http://127.0.0.1:6970/status'
 const INSTALL_DIR  = path.join(app.getPath('appData'), 'EraOnline')
 const GAME_EXE     = path.join(INSTALL_DIR, 'EraOnline.exe')
 const VERSION_FILE = path.join(INSTALL_DIR, 'version.txt')
-const LAUNCHER_VERSION = '1.0.0'  // bump this with each launcher release
 
 let win = null
 
@@ -43,8 +43,42 @@ function createWindow() {
   // win.webContents.openDevTools({ mode: 'detach' })
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  createWindow()
+  setupAutoUpdater()
+})
 app.on('window-all-closed', () => app.quit())
+
+// ---------------------------------------------------------------------------
+// Auto-updater (launcher self-update via electron-updater)
+// ---------------------------------------------------------------------------
+function setupAutoUpdater() {
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher',
+  })
+  autoUpdater.autoDownload    = true
+  autoUpdater.autoInstallOnAppQuit = false
+
+  autoUpdater.on('update-available', (info) => {
+    win?.webContents.send('launcher-update-available', info.version)
+  })
+  autoUpdater.on('download-progress', (p) => {
+    win?.webContents.send('launcher-update-progress', {
+      phase: `Downloading launcher... ${Math.round(p.percent)}%`,
+    })
+  })
+  autoUpdater.on('update-downloaded', () => {
+    win?.webContents.send('launcher-update-progress', { phase: 'Installing...' })
+    setTimeout(() => autoUpdater.quitAndInstall(true, true), 1500)
+  })
+  autoUpdater.on('error', (err) => {
+    win?.webContents.send('launcher-update-error', err.message)
+  })
+
+  // Delay first check so window is ready
+  setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 3000)
+}
 
 // ---------------------------------------------------------------------------
 // IPC: window controls
@@ -52,49 +86,6 @@ app.on('window-all-closed', () => app.quit())
 ipcMain.on('window-minimize', () => win?.minimize())
 ipcMain.on('window-close',    () => app.quit())
 
-// ---------------------------------------------------------------------------
-// IPC: self-update launcher
-// ---------------------------------------------------------------------------
-ipcMain.handle('install-launcher-update', async (_event, downloadUrl) => {
-  try {
-    win?.webContents.send('launcher-update-progress', { phase: 'Downloading launcher update...' })
-
-    const tmpExe = path.join(os.tmpdir(), 'EraOnlineLauncher-Setup.exe')
-
-    // Download the NSIS installer
-    const data = await downloadWithProgress(downloadUrl, (received, total) => {
-      const pct = total > 0 ? Math.round(received / total * 100) : 0
-      win?.webContents.send('launcher-update-progress', {
-        phase: `Downloading launcher... ${pct}%`
-      })
-    })
-    fs.writeFileSync(tmpExe, data)
-
-    win?.webContents.send('launcher-update-progress', { phase: 'Installing...' })
-
-    // Write a bat that: waits for us to exit, runs the silent installer, relaunches
-    const exePath = process.execPath
-    const batPath = path.join(os.tmpdir(), 'eo_launcher_update.bat')
-    const batContent = [
-      '@echo off',
-      'timeout /t 2 /nobreak >nul',
-      `"${tmpExe}" /S`,
-      'timeout /t 5 /nobreak >nul',
-      `start "" "${exePath}"`,
-      `del "${tmpExe}"`,
-      'del "%~0"',
-    ].join('\r\n')
-    fs.writeFileSync(batPath, batContent)
-
-    // Launch updater detached, then quit
-    const bat = spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore' })
-    bat.unref()
-    setTimeout(() => app.quit(), 500)
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: e.message }
-  }
-})
 
 // ---------------------------------------------------------------------------
 // IPC: fetch manifest + check for update
@@ -110,8 +101,6 @@ ipcMain.handle('check-update', async () => {
       manifest,
       installedVersion,
       needsUpdate: installedVersion !== manifest.version,
-      launcherNeedsUpdate: manifest.launcher_version && manifest.launcher_version !== LAUNCHER_VERSION,
-      launcherDownload: manifest.launcher_download || null,
     }
   } catch (e) {
     return { ok: false, error: e.message }

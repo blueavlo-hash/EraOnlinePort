@@ -263,11 +263,6 @@ async function startup() {
 
   hideProgress()
 
-  if (result.launcherNeedsUpdate && result.launcherDownload) {
-    await forcedLauncherUpdate(result.launcherDownload)
-    return  // after update the app quits — this line is a safety fallback
-  }
-
   if (_needsUpdate) {
     const label = result.installedVersion
       ? `Update available: ${result.installedVersion} → ${result.manifest.version}`
@@ -372,65 +367,57 @@ document.getElementById('inp-username').addEventListener('input', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Launcher forced self-update (blocking overlay, auto-starts)
+// Launcher auto-update overlay (driven by electron-updater events)
 // ---------------------------------------------------------------------------
-async function forcedLauncherUpdate(downloadUrl) {
-  // Lock the play button — nothing works until updated
-  setPlayBtn('checking')
-  playBtn.textContent = 'Update Required'
+;(function setupLauncherUpdateUI() {
+  let overlay = null
 
-  // Full-screen blocking overlay
-  const overlay = document.createElement('div')
-  overlay.style.cssText = `
-    position: fixed; inset: 0; z-index: 9999;
-    background: rgba(8,5,2,0.97);
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    gap: 18px;
-  `
-  overlay.innerHTML = `
-    <div style="color:#D9A626;font-size:15px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">
-      Launcher Update Required
-    </div>
-    <div id="lu-status" style="color:#c8b97a;font-size:12px;">Downloading update...</div>
-    <div style="width:340px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
-      <div id="lu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#8B5E0A,#D9A626);border-radius:3px;transition:width 0.2s;"></div>
-    </div>
-    <div id="lu-error" style="color:#c0392b;font-size:11px;display:none;"></div>
-  `
-  document.body.appendChild(overlay)
+  function getOverlay() {
+    if (overlay) return overlay
+    overlay = document.createElement('div')
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(8,5,2,0.97);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 18px;
+    `
+    overlay.innerHTML = `
+      <div style="color:#D9A626;font-size:15px;font-weight:bold;letter-spacing:2px;text-transform:uppercase;">
+        Launcher Update
+      </div>
+      <div id="lu-status" style="color:#c8b97a;font-size:12px;">Downloading update...</div>
+      <div style="width:340px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+        <div id="lu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#8B5E0A,#D9A626);border-radius:3px;transition:width 0.3s;"></div>
+      </div>
+    `
+    document.body.appendChild(overlay)
+    return overlay
+  }
 
-  const statusEl = overlay.querySelector('#lu-status')
-  const barEl    = overlay.querySelector('#lu-bar')
-  const errEl    = overlay.querySelector('#lu-error')
+  api.onLauncherUpdateAvailable((version) => {
+    setPlayBtn('checking')
+    playBtn.textContent = 'Updating...'
+    const ov = getOverlay()
+    ov.querySelector('#lu-status').textContent = `Downloading update v${version}...`
+  })
 
   api.onLauncherUpdateProgress((data) => {
+    const ov = getOverlay()
+    const statusEl = ov.querySelector('#lu-status')
+    const barEl    = ov.querySelector('#lu-bar')
     if (data.phase) statusEl.textContent = data.phase
-    // parse "Downloading launcher... 42%" for bar
     const m = (data.phase || '').match(/(\d+)%/)
     if (m) barEl.style.width = m[1] + '%'
   })
 
-  const result = await api.installLauncherUpdate(downloadUrl)
-
-  if (!result.ok) {
-    statusEl.textContent = 'Update failed — retrying in 10 seconds...'
-    errEl.textContent = result.error
-    errEl.style.display = 'block'
-    barEl.style.width = '0%'
-    // Retry once after 10s
-    await new Promise(r => setTimeout(r, 10000))
-    statusEl.textContent = 'Retrying...'
-    errEl.style.display = 'none'
-    const retry = await api.installLauncherUpdate(downloadUrl)
-    if (!retry.ok) {
-      statusEl.textContent = 'Update failed. Please reinstall the launcher.'
-      errEl.textContent = retry.error
-      errEl.style.display = 'block'
-    }
-  }
-  // On success, app.quit() is called by main — launcher closes and restarts
-}
+  api.onLauncherUpdateError((err) => {
+    if (!overlay) return
+    overlay.querySelector('#lu-status').textContent = 'Update failed — will retry next launch.'
+    overlay.querySelector('#lu-bar').style.width = '0%'
+    setTimeout(() => { overlay?.remove(); overlay = null }, 4000)
+  })
+})()
 
 // ---------------------------------------------------------------------------
 // Boot
