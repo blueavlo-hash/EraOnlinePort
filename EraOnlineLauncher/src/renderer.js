@@ -471,10 +471,16 @@ document.getElementById('inp-username').addEventListener('input', () => {
       refreshStatus()
       loadNews()
     } else {
-      // Update found — download already running, progress events will update the bar
+      // Update found — download running in main, progress events will update the bar
       luStatus.textContent = `Downloading launcher v${result.version}...`
-      // Overlay stays until quitAndInstall() restarts the launcher
+      // Overlay stays until the launcher restarts after install
     }
+  }).catch(() => {
+    // IPC failed for any reason — proceed anyway
+    overlay.remove()
+    startup()
+    refreshStatus()
+    loadNews()
   })
 })()
 

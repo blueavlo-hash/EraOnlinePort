@@ -1,18 +1,19 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron')
-const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const fs = require('fs')
 const https = require('https')
 const http = require('http')
 const net = require('net')
+const crypto = require('crypto')
 const { spawn } = require('child_process')
 const os = require('os')
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
-const MANIFEST_URL = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/latest.json'
-const NEWS_URL     = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/news.json'
+const MANIFEST_URL     = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/latest.json'
+const NEWS_URL         = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/news.json'
+const LAUNCHER_YML_URL = 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher/latest.yml'
 const INSTALL_DIR  = path.join(app.getPath('appData'), 'EraOnline')
 const GAME_EXE     = path.join(INSTALL_DIR, 'EraOnline.exe')
 const VERSION_FILE = path.join(INSTALL_DIR, 'version.txt')
@@ -45,52 +46,114 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow()
-  setupAutoUpdater()
+  setupLauncherUpdateCheck()
 })
 app.on('window-all-closed', () => app.quit())
 
 // ---------------------------------------------------------------------------
-// Auto-updater (launcher self-update via electron-updater)
+// Launcher self-update — manual HTTPS, no electron-updater
 // ---------------------------------------------------------------------------
-// Promise that resolves once we know whether a launcher update is available.
-// Renderer invokes 'check-launcher-update' to await this result — pull-based,
-// so there are no IPC timing issues regardless of when the renderer loads.
+// electron-updater has a documented issue where none of its events fire on
+// certain Windows NSIS installs, leaving the UI stuck forever. This replaces
+// it with a plain HTTPS fetch of latest.yml, version compare, and NSIS /S.
+
 let _resolveUpdateCheck = null
 const _updateCheckPromise = new Promise((resolve) => { _resolveUpdateCheck = resolve })
-const _resolveOnce = (result) => {
-  if (_resolveUpdateCheck) { _resolveUpdateCheck(result); _resolveUpdateCheck = null }
+const _resolveOnce = (() => {
+  let settled = false
+  return (result) => { if (!settled) { settled = true; _resolveUpdateCheck(result) } }
+})()
+
+function setupLauncherUpdateCheck() {
+  // Hard deadline — unblock the renderer after 10s even if GitHub is down
+  const timeoutHandle = setTimeout(() => _resolveOnce({ upToDate: true }), 10000)
+
+  _runLauncherUpdateCheck(timeoutHandle).catch(() => {
+    clearTimeout(timeoutHandle)
+    _resolveOnce({ upToDate: true })
+  })
 }
 
-function setupAutoUpdater() {
-  autoUpdater.setFeedURL({
-    provider: 'generic',
-    url: 'https://raw.githubusercontent.com/blueavlo-hash/EraOnlinePort/main/public/launcher',
-  })
-  autoUpdater.autoDownload         = true
-  autoUpdater.autoInstallOnAppQuit = false
+async function _runLauncherUpdateCheck(timeoutHandle) {
+  const ymlText = await fetchText(LAUNCHER_YML_URL, 9000)
+  const info    = parseLatestYml(ymlText)
 
-  autoUpdater.on('update-not-available', () => _resolveOnce({ upToDate: true }))
-  autoUpdater.on('update-available',  (info) => _resolveOnce({ upToDate: false, version: info.version }))
-  autoUpdater.on('error',             ()     => _resolveOnce({ upToDate: true }))
+  if (info.version === app.getVersion()) {
+    clearTimeout(timeoutHandle)
+    _resolveOnce({ upToDate: true })
+    return
+  }
 
-  autoUpdater.on('download-progress', (p) => {
-    win?.webContents.send('launcher-update-progress', {
-      phase: `Downloading launcher... ${Math.round(p.percent)}%`,
+  // Tell the renderer an update is available — it will show the download UI
+  clearTimeout(timeoutHandle)
+  _resolveOnce({ upToDate: false, version: info.version })
+
+  // Download + install runs concurrently; progress events update the renderer
+  await _downloadAndInstallLauncher(info)
+}
+
+// ---------------------------------------------------------------------------
+// Parse electron-builder's latest.yml (no js-yaml dependency needed)
+// ---------------------------------------------------------------------------
+function parseLatestYml(text) {
+  const get = (key) => {
+    // Match only unindented keys (col 0) to avoid the nested files: block
+    const m = text.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'))
+    if (!m) throw new Error(`latest.yml: missing field "${key}"`)
+    return m[1].trim().replace(/^['"]|['"]$/g, '')
+  }
+  const version = get('version')
+  const sha512  = get('sha512')
+  const url     = get('path')
+  if (!/^\d+\.\d+/.test(version))      throw new Error(`latest.yml: bad version "${version}"`)
+  if (sha512.length < 80)               throw new Error('latest.yml: sha512 looks truncated')
+  if (!url.startsWith('https://'))      throw new Error(`latest.yml: path not https: "${url}"`)
+  return { version, sha512, url }
+}
+
+// ---------------------------------------------------------------------------
+// Download, verify sha512, run NSIS /S, quit
+// ---------------------------------------------------------------------------
+async function _downloadAndInstallLauncher({ version, sha512, url }) {
+  const tmpPath = path.join(os.tmpdir(), `EraOnlineLauncherSetup-${version}.exe`)
+  try {
+    let lastPct = -1
+    const buf = await downloadWithProgress(url, (received, total) => {
+      const pct = total > 0 ? Math.round(received / total * 100) : 0
+      if (pct !== lastPct) {
+        lastPct = pct
+        win?.webContents.send('launcher-update-progress', {
+          phase: `Downloading launcher v${version}... ${pct}%`,
+        })
+      }
     })
-  })
-  autoUpdater.on('update-downloaded', () => {
+
+    win?.webContents.send('launcher-update-progress', { phase: 'Verifying...' })
+    const digest = crypto.createHash('sha512').update(buf).digest('base64')
+    if (digest !== sha512) throw new Error('SHA-512 mismatch — download may be corrupt')
+
+    fs.writeFileSync(tmpPath, buf)
     win?.webContents.send('launcher-update-progress', { phase: 'Installing...' })
-    setTimeout(() => autoUpdater.quitAndInstall(true, true), 1500)
-  })
 
-  // Safety timeout — proceed after 10s even if GitHub is unreachable
-  setTimeout(() => _resolveOnce({ upToDate: true }), 10000)
+    const child = spawn(tmpPath, ['/S'], { detached: true, stdio: 'ignore', cwd: os.tmpdir() })
+    child.unref()
+    await new Promise(r => setTimeout(r, 500))
+    app.quit()
 
-  autoUpdater.checkForUpdates().catch(() => _resolveOnce({ upToDate: true }))
+  } catch (err) {
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath) } catch {}
+    console.error('[launcher-update] failed:', err.message)
+    win?.webContents.send('launcher-update-progress', {
+      phase: `Update failed: ${err.message}. Restart to retry.`,
+    })
+  }
 }
 
-ipcMain.handle('get-version',            () => app.getVersion())
-ipcMain.handle('check-launcher-update',  () => _updateCheckPromise)
+// ---------------------------------------------------------------------------
+// IPC handlers
+// ---------------------------------------------------------------------------
+ipcMain.handle('get-version',           () => app.getVersion())
+ipcMain.handle('check-launcher-update', () => _updateCheckPromise)
 
 // ---------------------------------------------------------------------------
 // IPC: window controls
@@ -98,9 +161,8 @@ ipcMain.handle('check-launcher-update',  () => _updateCheckPromise)
 ipcMain.on('window-minimize', () => win?.minimize())
 ipcMain.on('window-close',    () => app.quit())
 
-
 // ---------------------------------------------------------------------------
-// IPC: fetch manifest + check for update
+// IPC: fetch manifest + check for game update
 // ---------------------------------------------------------------------------
 ipcMain.handle('check-update', async () => {
   try {
@@ -120,7 +182,7 @@ ipcMain.handle('check-update', async () => {
 })
 
 // ---------------------------------------------------------------------------
-// IPC: download + install update
+// IPC: download + install game update
 // ---------------------------------------------------------------------------
 ipcMain.handle('install-update', async (_event, manifest) => {
   try {
@@ -129,7 +191,6 @@ ipcMain.handle('install-update', async (_event, manifest) => {
     const parts = manifest.download_parts
     const tmpZip = path.join(os.tmpdir(), `EraOnline-${manifest.version}.zip`)
 
-    // Single URL (GitHub release) or multi-part: both handled the same way
     let totalBytes = 0
     const chunks = []
     for (let i = 0; i < parts.length; i++) {
@@ -152,27 +213,22 @@ ipcMain.handle('install-update', async (_event, manifest) => {
     const combined = Buffer.concat(chunks)
     fs.writeFileSync(tmpZip, combined)
 
-    // Extract to a temp dir first so we can handle subfolder structure
     win?.webContents.send('download-progress', { percent: 100, phase: 'Extracting...' })
     const tmpExtract = path.join(os.tmpdir(), `EraOnline-extract-${Date.now()}`)
     if (fs.existsSync(tmpExtract)) fs.rmSync(tmpExtract, { recursive: true, force: true })
     await extractZip(tmpZip, tmpExtract)
     fs.unlinkSync(tmpZip)
 
-    // Find the directory that contains EraOnline.exe (handles any subfolder depth)
     const gameDir = findFileDir(tmpExtract, 'EraOnline.exe')
     if (!gameDir) throw new Error('EraOnline.exe not found in downloaded package.')
 
-    // Copy game files to install dir
     fs.mkdirSync(INSTALL_DIR, { recursive: true })
     win?.webContents.send('download-progress', { percent: 100, phase: 'Installing...' })
     await copyDir(gameDir, INSTALL_DIR)
     fs.rmSync(tmpExtract, { recursive: true, force: true })
 
-    // Write version marker
     fs.writeFileSync(VERSION_FILE, manifest.version, 'utf8')
 
-    // Verify the exe is actually there (antivirus can silently remove it)
     if (!fs.existsSync(GAME_EXE)) {
       return { ok: false, error: 'EraOnline.exe was not found after installation. It may have been blocked by antivirus — try adding an exclusion for ' + INSTALL_DIR }
     }
@@ -184,7 +240,7 @@ ipcMain.handle('install-update', async (_event, manifest) => {
 })
 
 // ---------------------------------------------------------------------------
-// IPC: verify game install (for post-install check)
+// IPC: verify game install
 // ---------------------------------------------------------------------------
 ipcMain.handle('verify-install', () => {
   return { installed: fs.existsSync(GAME_EXE) }
@@ -203,15 +259,13 @@ ipcMain.handle('launch-game', async (_event, { username, token, serverAddress, s
     return { ok: false, error: 'Game client is outdated. Click Update before launching.' }
   }
   const args = []
-  if (username) args.push('--username', username)
-  if (token)    args.push('--token',    token)
-  if (serverAddress) args.push('--server-address', serverAddress)
-  if (serverPort)    args.push('--server-port',    String(serverPort))
+  if (username)      args.push('--username',       username)
+  if (token)         args.push('--token',           token)
+  if (serverAddress) args.push('--server-address',  serverAddress)
+  if (serverPort)    args.push('--server-port',     String(serverPort))
 
   const child = spawn(GAME_EXE, args, { detached: true, stdio: 'ignore', cwd: INSTALL_DIR })
   child.unref()
-  // Optionally hide launcher while game runs:
-  // win?.hide()
   return { ok: true }
 })
 
@@ -256,23 +310,31 @@ ipcMain.on('open-url', (_event, url) => shell.openExternal(url))
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function fetchJson(url) {
+function fetchText(url, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
-    const mod = url.startsWith('https') ? https : http
-    const req = mod.get(url, { timeout: 8000 }, (res) => {
-      // Follow redirects
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        return fetchJson(res.headers.location).then(resolve).catch(reject)
+    const req = https.get(url, { timeout: timeoutMs }, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
+        res.resume()
+        return fetchText(res.headers.location, timeoutMs).then(resolve).catch(reject)
       }
-      let data = ''
-      res.on('data', c => data += c)
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)) }
-        catch(e) { reject(new Error('Invalid JSON from ' + url)) }
-      })
+      if (res.statusCode !== 200) {
+        res.resume()
+        return reject(new Error(`HTTP ${res.statusCode} from ${url}`))
+      }
+      const chunks = []
+      res.on('data', c => chunks.push(c))
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+      res.on('error', reject)
     })
     req.on('error', reject)
-    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout fetching ' + url)) })
+    req.on('timeout', () => { req.destroy(new Error(`Timeout fetching ${url}`)) })
+  })
+}
+
+function fetchJson(url) {
+  return fetchText(url).then(text => {
+    try { return JSON.parse(text) }
+    catch { throw new Error('Invalid JSON from ' + url) }
   })
 }
 
@@ -280,24 +342,20 @@ function downloadWithProgress(url, onProgress) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http
     mod.get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
+        res.resume()
         return downloadWithProgress(res.headers.location, onProgress).then(resolve).catch(reject)
       }
       const total = parseInt(res.headers['content-length'] || '0', 10)
       let received = 0
       const chunks = []
-      res.on('data', chunk => {
-        chunks.push(chunk)
-        received += chunk.length
-        onProgress(received, total)
-      })
+      res.on('data', chunk => { chunks.push(chunk); received += chunk.length; onProgress(received, total) })
       res.on('end', () => resolve(Buffer.concat(chunks)))
       res.on('error', reject)
     }).on('error', reject)
   })
 }
 
-// Find the directory containing a target filename (recursive)
 function findFileDir(dir, filename) {
   for (const entry of fs.readdirSync(dir)) {
     const full = path.join(dir, entry)
@@ -310,7 +368,6 @@ function findFileDir(dir, filename) {
   return null
 }
 
-// Recursively copy a directory
 function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true })
   for (const entry of fs.readdirSync(src)) {

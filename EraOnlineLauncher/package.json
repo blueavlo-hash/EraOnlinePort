@@ -1,6 +1,6 @@
 {
   "name": "era-online-launcher",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Era Online Game Launcher",
   "main": "src/main.js",
   "scripts": {
@@ -40,7 +40,5 @@
     "electron": "33.4.11",
     "electron-builder": "^26.8.1"
   },
-  "dependencies": {
-    "electron-updater": "^6.8.3"
-  }
+  "dependencies": {}
 }
