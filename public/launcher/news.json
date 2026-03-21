@@ -1,0 +1,17 @@
+[
+    {
+        "date": "MARCH 2026",
+        "title": "v0.5.0-alpha — First Multiplayer Test",
+        "body": "Directional melee combat, PK gold loot, dead body visuals, vendor fixes, bank partial withdrawal, and the new auto-updating launcher. Thanks to everyone who helped test!"
+    },
+    {
+        "date": "MARCH 2026",
+        "title": "Launcher Released",
+        "body": "The Era Online launcher is now live. Future updates will download and install automatically — no manual downloads needed."
+    },
+    {
+        "date": "MARCH 2026",
+        "title": "Project Underway",
+        "body": "Era Online is a faithful Godot 4 port of the original 1999 VB6 MMORPG. Alpha testing is open — register an account in the launcher and jump in."
+    }
+]

@@ -629,6 +629,7 @@ func _ready() -> void:
 
 	print("[Server] Listening on port %d (TLS)" % PORT)
 	_load_admin_list()
+	_start_status_server()
 
 	# Initialise boss timers with staggered initial spawns
 	for boss_def in BOSS_DEFS:
@@ -642,6 +643,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if _tcp_server == null:
 		return
+
+	_tick_status_server()
 
 	# Accept new connections
 	while _tcp_server.is_connection_available():
@@ -6614,6 +6617,42 @@ func _encounter_templates_for(player_level: int) -> Array:
 # ---------------------------------------------------------------------------
 # Admin / moderator command system
 # ---------------------------------------------------------------------------
+
+## ---------------------------------------------------------------------------
+## HTTP Status Server — responds to GET /status on port 6969+1 (6970)
+## Used by the launcher to show online/offline + player count.
+## ---------------------------------------------------------------------------
+const STATUS_HTTP_PORT : int = 6970
+var _status_tcp: TCPServer = null
+var _status_clients: Array = []
+
+func _start_status_server() -> void:
+	_status_tcp = TCPServer.new()
+	var err := _status_tcp.listen(STATUS_HTTP_PORT)
+	if err != OK:
+		push_error("[Status] Could not listen on port %d" % STATUS_HTTP_PORT)
+		return
+	print("[Status] HTTP status server on port %d" % STATUS_HTTP_PORT)
+
+func _tick_status_server() -> void:
+	if _status_tcp == null:
+		return
+	if _status_tcp.is_connection_available():
+		_status_clients.append(_status_tcp.take_connection())
+	for i in range(_status_clients.size() - 1, -1, -1):
+		var conn: StreamPeerTCP = _status_clients[i]
+		if conn.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+			_status_clients.remove_at(i)
+			continue
+		var avail := conn.get_available_bytes()
+		if avail <= 0:
+			continue
+		conn.get_string(avail)  # consume request, we don't parse it
+		var player_count := _clients.size()
+		var body := '{"online":true,"players":%d,"max":1000}' % player_count
+		var response := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s" % [body.length(), body]
+		conn.put_data(response.to_utf8_buffer())
+		_status_clients.remove_at(i)
 
 func _load_admin_list() -> void:
 	var path := "user://server_data/admins.txt"
