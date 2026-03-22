@@ -246,7 +246,7 @@ func (w *World) npcDied(killer *Player, npc *NPC) {
 	}
 
 	// Quest kill progress.
-	w.onKillNPC(killer, npc.DefIndex)
+	w.onKillNPC(killer, npc.Def.Name)
 }
 
 func (w *World) spawnGroundItem(mapID, x, y, objIndex, amount int) {

@@ -2,40 +2,48 @@ package world
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/blueavlo-hash/eraonline-server/internal/proto"
 )
 
 // Quest objective types.
 const (
-	QuestObjKill    = 0
-	QuestObjGather  = 1
-	QuestObjCraft   = 2
-	QuestObjExplore = 3
-	QuestObjDeliver = 4
+	QuestObjKill         = 0
+	QuestObjGather       = 1
+	QuestObjCraft        = 2
+	QuestObjExplore      = 3
+	QuestObjDeliver      = 4
+	QuestObjKillSpecific = 5
+	QuestObjCook         = 6
 )
 
 // QuestObjective is one step of a quest.
 type QuestObjective struct {
 	Label    string
 	Required int
-	Type     int // QuestObj* constants
-	Param    int // kill: NPC index; gather/deliver: obj_index; explore: map_id
+	Type     int
+	Param    int    // explore: map_id
+	ParamStr string // kill_specific: npc_name_contains; craft: action string
+	ObjTypes []int  // gather: obj_type values to match in inventory
 }
 
-// QuestDef defines one quest.
+// QuestDef defines one quest. Mirrored from server_quests.gd.
 type QuestDef struct {
-	ID          int
-	Name        string
-	Desc        string
-	NPCID       int // NPC that gives/completes this quest (by NPC def index)
-	Prereq      int // quest ID that must be complete first (0 = none)
-	Objectives  []QuestObjective
-	RewardGold  int
-	RewardXP    int
-	RewardItems []QuestRewardItem
-	FactionName string
-	FactionRep  int
+	ID              int
+	Name            string
+	Desc            string
+	GiverNameMatch  string // case-insensitive substring of NPC name
+	TurninNameMatch string // may differ from giver
+	Prereqs         []int  // all must be completed before this quest can be accepted
+	LevelReq        int
+	Objectives      []QuestObjective
+	RewardGold      int
+	RewardXP        int
+	RewardItems     []QuestRewardItem
+	FactionName     string
+	FactionRep      int
+	CompletionMsg   string
 }
 
 // QuestRewardItem is an item rewarded on quest completion.
@@ -46,81 +54,262 @@ type QuestRewardItem struct {
 
 // questDefs is the master quest list. Mirrored from server_quests.gd.
 var questDefs = []QuestDef{
-	// Elder chain (NPC index 1)
-	{1, "The Elder's Request", "The village elder needs rats killed.", 1, 0,
-		[]QuestObjective{{Label: "Kill rats", Required: 5, Type: QuestObjKill, Param: 1}},
-		100, 200, nil, "Millwall", 75},
-	{2, "Mushroom Stew", "Gather mushrooms for the elder.", 1, 1,
-		[]QuestObjective{{Label: "Gather mushrooms", Required: 10, Type: QuestObjGather, Param: 60}},
-		150, 300, nil, "Millwall", 100},
-	{3, "Protect the Farm", "Kill wolves threatening the farm.", 1, 2,
-		[]QuestObjective{{Label: "Kill wolves", Required: 8, Type: QuestObjKill, Param: 5}},
-		200, 500, nil, "Millwall", 100},
-	{4, "Ancient Ruins", "Explore the ancient ruins.", 1, 3,
-		[]QuestObjective{{Label: "Visit the ruins", Required: 1, Type: QuestObjExplore, Param: 12}},
-		300, 750, nil, "Millwall", 150},
-	{5, "The Elder's Legacy", "Defeat the dungeon boss.", 1, 4,
-		[]QuestObjective{{Label: "Defeat the boss", Required: 1, Type: QuestObjKill, Param: 50}},
-		500, 1500, []QuestRewardItem{{101, 1}}, "Millwall", 200},
-	// Blacksmith chain (NPC index 2)
-	{6, "Ore Delivery", "Mine ore for the blacksmith.", 2, 0,
-		[]QuestObjective{{Label: "Mine ore", Required: 10, Type: QuestObjGather, Param: 30}},
-		120, 250, nil, "Ironhold", 75},
-	{7, "Steel for the Forge", "Smelt steel bars for the blacksmith.", 2, 6,
-		[]QuestObjective{{Label: "Smelt steel", Required: 5, Type: QuestObjCraft, Param: 31}},
-		200, 400, nil, "Ironhold", 100},
-	{8, "A Sturdy Sword", "Craft a sword for the blacksmith.", 2, 7,
-		[]QuestObjective{{Label: "Craft a sword", Required: 1, Type: QuestObjCraft, Param: 102}},
-		350, 700, []QuestRewardItem{{102, 1}}, "Ironhold", 150},
-	{9, "Armory Restocked", "Deliver the weapons to the guard.", 2, 8,
-		[]QuestObjective{{Label: "Deliver to guard", Required: 1, Type: QuestObjDeliver, Param: 102}},
-		500, 1000, nil, "Ironhold", 200},
-	// Cook chain (NPC index 3)
-	{10, "Hungry Village", "Cook meals for the village.", 3, 0,
-		[]QuestObjective{{Label: "Cook fish", Required: 3, Type: QuestObjCraft, Param: 51}},
-		100, 200, nil, "Millwall", 75},
-	{11, "Festival Feast", "Prepare a grand feast.", 3, 10,
-		[]QuestObjective{
-			{Label: "Cook fish", Required: 5, Type: QuestObjCraft, Param: 51},
-			{Label: "Gather mushrooms", Required: 5, Type: QuestObjGather, Param: 60},
-		},
-		200, 500, nil, "Millwall", 100},
-	{12, "The Secret Recipe", "Find the lost recipe scroll.", 3, 11,
-		[]QuestObjective{{Label: "Find scroll", Required: 1, Type: QuestObjGather, Param: 200}},
-		300, 750, nil, "Millwall", 150},
-	// Guard chain (NPC index 4)
-	{13, "Patrol Duty", "Kill bandits on the road.", 4, 0,
-		[]QuestObjective{{Label: "Kill bandits", Required: 5, Type: QuestObjKill, Param: 10}},
-		150, 300, nil, "Ironhold", 75},
-	{14, "The Bandit Leader", "Track down the bandit leader.", 4, 13,
-		[]QuestObjective{
-			{Label: "Kill bandits", Required: 10, Type: QuestObjKill, Param: 10},
-			{Label: "Defeat bandit leader", Required: 1, Type: QuestObjKill, Param: 11},
-		},
-		300, 600, nil, "Ironhold", 100},
-	{15, "Evidence Trail", "Gather bandit insignia.", 4, 14,
-		[]QuestObjective{{Label: "Collect insignia", Required: 3, Type: QuestObjGather, Param: 201}},
-		400, 800, nil, "Ironhold", 150},
-	{16, "Justice Served", "Bring the evidence to the magistrate.", 4, 15,
-		[]QuestObjective{{Label: "Deliver evidence", Required: 1, Type: QuestObjDeliver, Param: 201}},
-		600, 1200, []QuestRewardItem{{200, 1}}, "Ironhold", 200},
-	// Merchant chain (NPC index 5)
-	{17, "Trade Route", "Clear the road of monsters.", 5, 0,
-		[]QuestObjective{{Label: "Kill monsters on road", Required: 10, Type: QuestObjKill, Param: 15}},
-		200, 400, nil, "Millwall", 75},
-	{18, "Missing Goods", "Recover stolen merchant goods.", 5, 17,
-		[]QuestObjective{{Label: "Recover goods", Required: 5, Type: QuestObjGather, Param: 202}},
-		300, 600, nil, "Millwall", 100},
-	{19, "Merchant's Favor", "Escort goods to the next town.", 5, 18,
-		[]QuestObjective{{Label: "Deliver goods", Required: 1, Type: QuestObjDeliver, Param: 202}},
-		500, 1000, nil, "Millwall", 150},
-	// Spell Merchant (NPC index 6)
-	{20, "Arcane Components", "Gather magical reagents.", 6, 0,
-		[]QuestObjective{
-			{Label: "Gather reagents", Required: 5, Type: QuestObjGather, Param: 203},
-			{Label: "Kill elementals", Required: 3, Type: QuestObjKill, Param: 20},
-		},
-		400, 1000, []QuestRewardItem{{204, 1}}, "Wizards", 200},
+	// -----------------------------------------------------------------------
+	// Chain 1 — Mayor (tutorial chain)
+	// -----------------------------------------------------------------------
+	{
+		ID: 1, Name: "A Warrior's Beginning",
+		Desc:            "You look capable, adventurer. Prove yourself by defeating some of the creatures plaguing our lands.",
+		GiverNameMatch:  "mayor",
+		TurninNameMatch: "mayor",
+		LevelReq:        1,
+		Objectives:      []QuestObjective{{Label: "Kill hostile NPCs", Required: 5, Type: QuestObjKill}},
+		RewardGold: 100, RewardXP: 200,
+		FactionName: "haven", FactionRep: 75,
+		CompletionMsg: "Well done, warrior. You are ready for greater challenges.",
+	},
+	{
+		ID: 2, Name: "Gather Resources",
+		Desc:            "Good work. Now learn to gather resources. Bring me materials.",
+		GiverNameMatch:  "mayor",
+		TurninNameMatch: "mayor",
+		Prereqs:         []int{1},
+		LevelReq:        1,
+		Objectives:      []QuestObjective{{Label: "Gather ore or logs", Required: 5, Type: QuestObjGather, ObjTypes: []int{32, 20}}},
+		RewardGold: 50, RewardXP: 100, RewardItems: []QuestRewardItem{{3, 1}},
+		FactionName: "haven", FactionRep: 75,
+		CompletionMsg: "Excellent! These materials will serve you well.",
+	},
+	{
+		ID: 4, Name: "The Elder's Errand",
+		Desc:            "I need you to deliver this letter to the Blacksmith. He must know of the danger approaching.",
+		GiverNameMatch:  "mayor",
+		TurninNameMatch: "master blacksmith",
+		Prereqs:         []int{2},
+		LevelReq:        2,
+		Objectives:      []QuestObjective{{Label: "Deliver the letter to the Blacksmith", Required: 1, Type: QuestObjDeliver}},
+		RewardGold: 75, RewardXP: 150,
+		FactionName: "haven", FactionRep: 50,
+		CompletionMsg: "Thank you for the message. The Elder was right to send you.",
+	},
+	{
+		ID: 5, Name: "Clearing the Road",
+		Desc:            "The roads are not safe. I need you to clear more creatures before the merchants can travel safely.",
+		GiverNameMatch:  "mayor",
+		TurninNameMatch: "mayor",
+		Prereqs:         []int{4},
+		LevelReq:        3,
+		Objectives:      []QuestObjective{{Label: "Kill hostile creatures", Required: 20, Type: QuestObjKill}},
+		RewardGold: 200, RewardXP: 400,
+		FactionName: "haven", FactionRep: 100,
+		CompletionMsg: "The roads are safer now. Thank you, adventurer.",
+	},
+	{
+		ID: 6, Name: "The Ancient Threat",
+		Desc:            "Ancient serpents have returned to the land. Slay five of them to protect the village.",
+		GiverNameMatch:  "mayor",
+		TurninNameMatch: "mayor",
+		Prereqs:         []int{5},
+		LevelReq:        5,
+		Objectives:      []QuestObjective{{Label: "Kill Serpents", Required: 5, Type: QuestObjKillSpecific, ParamStr: "serpent"}},
+		RewardGold: 300, RewardXP: 600,
+		FactionName: "haven", FactionRep: 150,
+		CompletionMsg: "The ancient threat is no more. The village owes you a great debt.",
+	},
+
+	// -----------------------------------------------------------------------
+	// Chain 2 — Master Blacksmith
+	// -----------------------------------------------------------------------
+	{
+		ID: 7, Name: "Raw Materials",
+		Desc:            "Ah, a fresh face. I am Master Blacksmith Aldric. Gather ten pieces of ore and prove you are worth teaching.",
+		GiverNameMatch:  "master blacksmith",
+		TurninNameMatch: "master blacksmith",
+		LevelReq:        1,
+		Objectives:      []QuestObjective{{Label: "Gather ore", Required: 10, Type: QuestObjGather, ObjTypes: []int{32}}},
+		RewardGold: 80, RewardXP: 160,
+		FactionName: "ironhaven", FactionRep: 100,
+		CompletionMsg: "Good haul! Now let me show you what to do with all this ore.",
+	},
+	{
+		ID: 8, Name: "Learning to Smelt",
+		Desc:            "Every blacksmith must learn to smelt ore into steel. Smelt three batches for me.",
+		GiverNameMatch:  "master blacksmith",
+		TurninNameMatch: "master blacksmith",
+		Prereqs:         []int{7},
+		LevelReq:        2,
+		Objectives:      []QuestObjective{{Label: "Smelt ore into steel", Required: 3, Type: QuestObjCraft, ParamStr: "smelt"}},
+		RewardGold: 120, RewardXP: 240,
+		FactionName: "ironhaven", FactionRep: 150,
+		CompletionMsg: "Fine steel! Now you are ready to forge real weapons.",
+	},
+	{
+		ID: 9, Name: "First Weapon",
+		Desc:            "Use a blacksmithing blueprint to forge your first weapon. Show me what you can do!",
+		GiverNameMatch:  "master blacksmith",
+		TurninNameMatch: "master blacksmith",
+		Prereqs:         []int{8},
+		LevelReq:        3,
+		Objectives:      []QuestObjective{{Label: "Forge a weapon or armour", Required: 1, Type: QuestObjCraft, ParamStr: "forge"}},
+		RewardGold: 200, RewardXP: 300, RewardItems: []QuestRewardItem{{5, 1}},
+		FactionName: "ironhaven", FactionRep: 175,
+		CompletionMsg: "An excellent piece of work! You have the makings of a true smith.",
+	},
+	{
+		ID: 10, Name: "Arming the Militia",
+		Desc:            "The militia needs weapons. Forge five items from blueprints to equip them.",
+		GiverNameMatch:  "master blacksmith",
+		TurninNameMatch: "master blacksmith",
+		Prereqs:         []int{9},
+		LevelReq:        5,
+		Objectives:      []QuestObjective{{Label: "Forge weapons or armour", Required: 5, Type: QuestObjCraft, ParamStr: "forge"}},
+		RewardGold: 500, RewardXP: 800,
+		FactionName: "ironhaven", FactionRep: 200,
+		CompletionMsg: "The militia is armed and ready. You have done great service for this town.",
+	},
+
+	// -----------------------------------------------------------------------
+	// Chain 3 — Cook
+	// -----------------------------------------------------------------------
+	{
+		ID: 3, Name: "The Hungry Traveler",
+		Desc:            "I could use some help in the kitchen. Show me you can cook.",
+		GiverNameMatch:  "cook",
+		TurninNameMatch: "cook",
+		LevelReq:        1,
+		Objectives:      []QuestObjective{{Label: "Cook food items", Required: 3, Type: QuestObjCook}},
+		RewardGold: 75, RewardXP: 150,
+		FactionName: "thornwall", FactionRep: 100,
+		CompletionMsg: "Delicious! You have real talent in the kitchen.",
+	},
+	{
+		ID: 11, Name: "Feed the Village",
+		Desc:            "Winter is coming and the village needs food. Cook ten meals for the storeroom.",
+		GiverNameMatch:  "cook",
+		TurninNameMatch: "cook",
+		Prereqs:         []int{3},
+		LevelReq:        2,
+		Objectives:      []QuestObjective{{Label: "Cook food for the village", Required: 10, Type: QuestObjCook}},
+		RewardGold: 150, RewardXP: 250,
+		FactionName: "thornwall", FactionRep: 150,
+		CompletionMsg: "The village will eat well this winter, thanks to you!",
+	},
+	{
+		ID: 12, Name: "Rare Catch",
+		Desc:            "I need fresh fish for a special feast. Bring me five fish from the nearby waters.",
+		GiverNameMatch:  "cook",
+		TurninNameMatch: "cook",
+		Prereqs:         []int{11},
+		LevelReq:        3,
+		Objectives:      []QuestObjective{{Label: "Gather fresh fish", Required: 5, Type: QuestObjGather, ObjTypes: []int{39}}},
+		RewardGold: 100, RewardXP: 200,
+		FactionName: "thornwall", FactionRep: 125,
+		CompletionMsg: "What a wonderful catch! The feast will be remembered for years.",
+	},
+
+	// -----------------------------------------------------------------------
+	// Chain 4 — Guard
+	// -----------------------------------------------------------------------
+	{
+		ID: 13, Name: "Pest Control",
+		Desc:            "Giant spiders have been terrorizing travellers on the road. Kill ten of them.",
+		GiverNameMatch:  "guard",
+		TurninNameMatch: "guard",
+		LevelReq:        2,
+		Objectives:      []QuestObjective{{Label: "Kill Spiders", Required: 10, Type: QuestObjKillSpecific, ParamStr: "spider"}},
+		RewardGold: 120, RewardXP: 250,
+		FactionName: "thornwall", FactionRep: 100,
+		CompletionMsg: "Well done! The roads are safe again for now.",
+	},
+	{
+		ID: 14, Name: "Into the Wilderness",
+		Desc:            "We need scouts in the eastern forest. Explore the area and report back.",
+		GiverNameMatch:  "guard",
+		TurninNameMatch: "guard",
+		LevelReq:        1,
+		Objectives:      []QuestObjective{{Label: "Explore the Eastern Forest", Required: 1, Type: QuestObjExplore, Param: 4}},
+		RewardGold: 50, RewardXP: 100,
+		FactionName: "thornwall", FactionRep: 75,
+		CompletionMsg: "Good scouting! Now we know what lurks out there.",
+	},
+	{
+		ID: 15, Name: "Big Game",
+		Desc:            "Trolls have moved into the region. Take down five of them before they destroy the farmsteads.",
+		GiverNameMatch:  "guard",
+		TurninNameMatch: "guard",
+		Prereqs:         []int{13, 14},
+		LevelReq:        5,
+		Objectives:      []QuestObjective{{Label: "Kill Trolls", Required: 5, Type: QuestObjKillSpecific, ParamStr: "troll"}},
+		RewardGold: 250, RewardXP: 500,
+		FactionName: "thornwall", FactionRep: 175,
+		CompletionMsg: "Those trolls won't be bothering anyone anymore. Exceptional work!",
+	},
+	{
+		ID: 16, Name: "Ancient Ruins",
+		Desc:            "Strange lights have been seen in the ancient ruins to the south-east. Scout the area.",
+		GiverNameMatch:  "guard",
+		TurninNameMatch: "guard",
+		Prereqs:         []int{14},
+		LevelReq:        3,
+		Objectives:      []QuestObjective{{Label: "Explore the Ancient Ruins", Required: 1, Type: QuestObjExplore, Param: 6}},
+		RewardGold: 100, RewardXP: 200,
+		FactionName: "thornwall", FactionRep: 100,
+		CompletionMsg: "Those ruins are indeed dangerous. Good to have a full report.",
+	},
+
+	// -----------------------------------------------------------------------
+	// Chain 5 — Merchant Tim
+	// -----------------------------------------------------------------------
+	{
+		ID: 17, Name: "Supply Run",
+		Desc:            "My lumber supply is depleted. Bring me five logs and I will make it worth your while.",
+		GiverNameMatch:  "tim",
+		TurninNameMatch: "tim",
+		LevelReq:        1,
+		Objectives:      []QuestObjective{{Label: "Gather logs", Required: 5, Type: QuestObjGather, ObjTypes: []int{20}}},
+		RewardGold: 60, RewardXP: 120,
+		FactionName: "haven", FactionRep: 75,
+		CompletionMsg: "Perfect! That's exactly what I needed. Come back if you want more work.",
+	},
+	{
+		ID: 18, Name: "Timber!",
+		Desc:            "I need planks cut from logs for my workshop. Use the carpentry station to cut three batches.",
+		GiverNameMatch:  "tim",
+		TurninNameMatch: "tim",
+		Prereqs:         []int{17},
+		LevelReq:        2,
+		Objectives:      []QuestObjective{{Label: "Cut logs into planks", Required: 3, Type: QuestObjCraft, ParamStr: "planks"}},
+		RewardGold: 100, RewardXP: 200,
+		FactionName: "haven", FactionRep: 100,
+		CompletionMsg: "Good clean cuts! Those planks will build something fine.",
+	},
+	{
+		ID: 19, Name: "Well Equipped",
+		Desc:            "I need a reliable supply of ore for trade. Gather ten pieces and bring them here.",
+		GiverNameMatch:  "tim",
+		TurninNameMatch: "tim",
+		Prereqs:         []int{17},
+		LevelReq:        2,
+		Objectives:      []QuestObjective{{Label: "Gather ore", Required: 10, Type: QuestObjGather, ObjTypes: []int{32}}},
+		RewardGold: 150, RewardXP: 250,
+		FactionName: "haven", FactionRep: 125,
+		CompletionMsg: "Excellent stock! The trade caravans will be pleased.",
+	},
+
+	// -----------------------------------------------------------------------
+	// Chain 6 — Sylvara the Spell Merchant
+	// -----------------------------------------------------------------------
+	{
+		ID: 20, Name: "Magical Aptitude",
+		Desc:            "You found me all the way out here — good. The air elementals in the ancient ruins are a danger to all. Slay three and I will teach you something priceless.",
+		GiverNameMatch:  "sylvara",
+		TurninNameMatch: "sylvara",
+		LevelReq:        4,
+		Objectives:      []QuestObjective{{Label: "Kill Elementals", Required: 3, Type: QuestObjKillSpecific, ParamStr: "elemental"}},
+		RewardGold: 200, RewardXP: 400,
+		FactionName: "sealport", FactionRep: 150,
+		CompletionMsg: "Impressive! You have proven yourself worthy of learning the higher arts.",
+	},
 }
 
 // questDefByID returns a quest definition by ID.
@@ -133,12 +322,18 @@ func questDefByID(id int) *QuestDef {
 	return nil
 }
 
-// questsForNPC returns all quest defs assigned to a given NPC def index.
-func questsForNPC(npcDefIndex int) []*QuestDef {
+// questsForNPCByName returns quests where this NPC is the giver or turn-in target,
+// matching by case-insensitive substring of the NPC name.
+func questsForNPCByName(npcName string) []*QuestDef {
+	nameLower := strings.ToLower(npcName)
 	var out []*QuestDef
 	for i := range questDefs {
-		if questDefs[i].NPCID == npcDefIndex {
-			out = append(out, &questDefs[i])
+		qd := &questDefs[i]
+		giver := strings.ToLower(qd.GiverNameMatch)
+		turnin := strings.ToLower(qd.TurninNameMatch)
+		if (giver != "" && strings.Contains(nameLower, giver)) ||
+			(turnin != "" && strings.Contains(nameLower, turnin)) {
+			out = append(out, qd)
 		}
 	}
 	return out
@@ -155,40 +350,64 @@ func (w *World) handleQuestTalk(p *Player, payload []byte) {
 		return
 	}
 
-	quests := questsForNPC(npc.DefIndex)
-	if len(quests) == 0 {
-		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(npc.Def.Name+" has nothing for you."))
+	nameLower := strings.ToLower(npc.Def.Name)
+
+	npcIsGiver := func(qd *QuestDef) bool {
+		m := strings.ToLower(qd.GiverNameMatch)
+		return m != "" && strings.Contains(nameLower, m)
+	}
+	npcIsTurnin := func(qd *QuestDef) bool {
+		m := strings.ToLower(qd.TurninNameMatch)
+		return m != "" && strings.Contains(nameLower, m)
+	}
+
+	// Priority 1: active quests that can be turned in at this NPC.
+	for questID := range p.ActiveQuests {
+		qd := questDefByID(questID)
+		if qd == nil || !npcIsTurnin(qd) {
+			continue
+		}
+		if w.questCanTurnIn(p, qd) {
+			w.sendQuestOffer(p, npc, qd, true)
+			return
+		}
+	}
+
+	// Priority 2: active quests — show progress reminder if this NPC is the giver
+	// (only when giver != turnin, otherwise they would have been caught above).
+	for questID := range p.ActiveQuests {
+		qd := questDefByID(questID)
+		if qd == nil || !npcIsGiver(qd) {
+			continue
+		}
+		if !npcIsTurnin(qd) {
+			progress := w.questProgressStr(p, qd)
+			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("["+qd.Name+"] "+progress))
+			return
+		}
+		// Same giver+turnin but not yet complete — show progress.
+		progress := w.questProgressStr(p, qd)
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("["+qd.Name+"] "+progress))
 		return
 	}
 
-	// Find first quest that is: available (prereq done, not started) or active (can turn in).
-	for _, qd := range quests {
-		// Check prereq.
-		if qd.Prereq > 0 && !p.hasCompletedQuest(qd.Prereq) {
+	// Priority 3: offer the first available quest this NPC can give.
+	for i := range questDefs {
+		qd := &questDefs[i]
+		if !npcIsGiver(qd) {
 			continue
 		}
-		// Already completed?
-		if p.hasCompletedQuest(qd.ID) {
+		if p.hasActiveQuest(qd.ID) || p.hasCompletedQuest(qd.ID) {
 			continue
 		}
-		// Active — check if completable.
-		if p.hasActiveQuest(qd.ID) {
-			if w.questCanTurnIn(p, qd) {
-				w.sendQuestOffer(p, npc, qd, true)
-			} else {
-				// Send progress reminder.
-				progress := w.questProgressStr(p, qd)
-				w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("["+qd.Name+"] "+progress))
-			}
-			return
+		if !p.hasAllPrereqsComplete(qd.Prereqs) {
+			continue
 		}
-		// Available — offer it.
 		w.sendQuestOffer(p, npc, qd, false)
 		return
 	}
 
-	// No quests available.
-	w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(npc.Def.Name+" has no more quests for you."))
+	w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(npc.Def.Name+" has nothing for you."))
 }
 
 func (w *World) sendQuestOffer(p *Player, npc *NPC, qd *QuestDef, isTurnin bool) {
@@ -237,9 +456,8 @@ func (w *World) handleQuestAccept(p *Player, payload []byte) {
 		return
 	}
 
-	// Validate prereqs.
-	if qd.Prereq > 0 && !p.hasCompletedQuest(qd.Prereq) {
-		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You must complete another quest first."))
+	if !p.hasAllPrereqsComplete(qd.Prereqs) {
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You must complete the required quests first."))
 		return
 	}
 	if p.hasActiveQuest(qd.ID) || p.hasCompletedQuest(qd.ID) {
@@ -267,10 +485,10 @@ func (w *World) handleQuestTurnin(p *Player, payload []byte) {
 		return
 	}
 
-	// Remove required items from inventory (for gather/deliver objectives).
+	// Remove required items from inventory for gather objectives.
 	for _, obj := range qd.Objectives {
-		if obj.Type == QuestObjGather || obj.Type == QuestObjDeliver {
-			w.removeItemFromInventory(p, obj.Param, obj.Required)
+		if obj.Type == QuestObjGather {
+			w.removeItemsFromInventoryByTypes(p, obj.ObjTypes, obj.Required)
 		}
 	}
 
@@ -294,6 +512,9 @@ func (w *World) handleQuestTurnin(p *Player, payload []byte) {
 	w.sendTo(p, proto.MsgSQuestComplete, wr.Bytes())
 	w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
 	w.sendTo(p, proto.MsgSStats, p.BuildStats())
+	if qd.CompletionMsg != "" {
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(qd.CompletionMsg))
+	}
 
 	w.checkAchievements(p, "quest", 1)
 	w.checkLevelUp(p)
@@ -306,10 +527,14 @@ func (w *World) questCanTurnIn(p *Player, qd *QuestDef) bool {
 		return false
 	}
 	for i, obj := range qd.Objectives {
-		current := progress[i]
-		// For gather objectives, also check current inventory.
-		if obj.Type == QuestObjGather || obj.Type == QuestObjDeliver {
-			current = w.countInInventory(p, obj.Param)
+		var current int
+		switch obj.Type {
+		case QuestObjGather:
+			current = w.countInInventoryByTypes(p, obj.ObjTypes)
+		case QuestObjDeliver:
+			current = obj.Required // deliver is always ready once accepted
+		default:
+			current = progress[i]
 		}
 		if current < obj.Required {
 			return false
@@ -325,9 +550,14 @@ func (w *World) questProgressStr(p *Player, qd *QuestDef) string {
 	}
 	out := ""
 	for i, obj := range qd.Objectives {
-		current := progress[i]
-		if obj.Type == QuestObjGather || obj.Type == QuestObjDeliver {
-			current = w.countInInventory(p, obj.Param)
+		var current int
+		switch obj.Type {
+		case QuestObjGather:
+			current = w.countInInventoryByTypes(p, obj.ObjTypes)
+		case QuestObjDeliver:
+			current = obj.Required
+		default:
+			current = progress[i]
 		}
 		if out != "" {
 			out += ", "
@@ -350,10 +580,9 @@ func (w *World) sendQuestUpdate(p *Player, questID int) {
 }
 
 func (w *World) sendQuestIndicators(p *Player) {
-	// Build indicator list for NPCs that have available/completable quests.
 	type indicator struct {
 		npcInstanceID int32
-		symbol        string // "!" = available, "?" = completable, "" = none
+		symbol        string
 	}
 	var indicators []indicator
 
@@ -361,20 +590,25 @@ func (w *World) sendQuestIndicators(p *Player) {
 		if npc.MapID != p.MapID {
 			continue
 		}
-		quests := questsForNPC(npc.DefIndex)
-		for _, qd := range quests {
-			sym := ""
-			if p.hasActiveQuest(qd.ID) && w.questCanTurnIn(p, qd) {
+		nameLower := strings.ToLower(npc.Def.Name)
+		sym := ""
+		for i := range questDefs {
+			qd := &questDefs[i]
+			giverMatch := strings.ToLower(qd.GiverNameMatch)
+			turninMatch := strings.ToLower(qd.TurninNameMatch)
+			isGiver := giverMatch != "" && strings.Contains(nameLower, giverMatch)
+			isTurnin := turninMatch != "" && strings.Contains(nameLower, turninMatch)
+
+			if isTurnin && p.hasActiveQuest(qd.ID) && w.questCanTurnIn(p, qd) {
 				sym = "?"
-			} else if !p.hasActiveQuest(qd.ID) && !p.hasCompletedQuest(qd.ID) {
-				if qd.Prereq == 0 || p.hasCompletedQuest(qd.Prereq) {
-					sym = "!"
-				}
-			}
-			if sym != "" {
-				indicators = append(indicators, indicator{npc.InstanceID, sym})
 				break
 			}
+			if isGiver && sym != "?" && !p.hasActiveQuest(qd.ID) && !p.hasCompletedQuest(qd.ID) && p.hasAllPrereqsComplete(qd.Prereqs) {
+				sym = "!"
+			}
+		}
+		if sym != "" {
+			indicators = append(indicators, indicator{npc.InstanceID, sym})
 		}
 	}
 
@@ -387,37 +621,80 @@ func (w *World) sendQuestIndicators(p *Player) {
 	w.sendTo(p, proto.MsgSQuestIndicators, wr.Bytes())
 }
 
-// onKillNPC updates quest progress for kill objectives.
-func (w *World) onKillNPC(p *Player, npcDefIndex int) {
+// onKillNPC updates quest progress for kill and kill_specific objectives.
+func (w *World) onKillNPC(p *Player, npcName string) {
+	nameLower := strings.ToLower(npcName)
 	for questID, progress := range p.ActiveQuests {
 		qd := questDefByID(questID)
 		if qd == nil {
 			continue
 		}
+		changed := false
 		for i, obj := range qd.Objectives {
-			if obj.Type == QuestObjKill && obj.Param == npcDefIndex {
+			switch obj.Type {
+			case QuestObjKill:
 				progress[i] = imax(0, progress[i]) + 1
-				w.sendQuestUpdate(p, questID)
-				if w.questCanTurnIn(p, qd) {
-					w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("["+qd.Name+"] Quest complete! Return to turn in."))
+				changed = true
+			case QuestObjKillSpecific:
+				if obj.ParamStr != "" && strings.Contains(nameLower, strings.ToLower(obj.ParamStr)) {
+					progress[i] = imax(0, progress[i]) + 1
+					changed = true
 				}
+			}
+		}
+		if changed {
+			w.sendQuestUpdate(p, questID)
+			if w.questCanTurnIn(p, qd) {
+				w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("["+qd.Name+"] Quest complete! Return to turn in."))
 			}
 		}
 	}
 	w.checkAchievements(p, "kill", 1)
 }
 
-// onCraftItem updates quest progress for craft objectives.
-func (w *World) onCraftItem(p *Player, objIndex int) {
+// onCraftItem updates quest progress for craft objectives matching the given action string.
+func (w *World) onCraftItem(p *Player, action string) {
+	actionLower := strings.ToLower(action)
 	for questID, progress := range p.ActiveQuests {
 		qd := questDefByID(questID)
 		if qd == nil {
 			continue
 		}
+		changed := false
 		for i, obj := range qd.Objectives {
-			if obj.Type == QuestObjCraft && obj.Param == objIndex {
+			if obj.Type == QuestObjCraft && strings.ToLower(obj.ParamStr) == actionLower {
 				progress[i] = imax(0, progress[i]) + 1
-				w.sendQuestUpdate(p, questID)
+				changed = true
+			}
+		}
+		if changed {
+			w.sendQuestUpdate(p, questID)
+			if w.questCanTurnIn(p, qd) {
+				w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("["+qd.Name+"] Quest complete! Return to turn in."))
+			}
+		}
+	}
+	w.checkAchievements(p, "craft", 1)
+}
+
+// onCookItem updates quest progress for cook objectives.
+func (w *World) onCookItem(p *Player) {
+	for questID, progress := range p.ActiveQuests {
+		qd := questDefByID(questID)
+		if qd == nil {
+			continue
+		}
+		changed := false
+		for i, obj := range qd.Objectives {
+			if obj.Type == QuestObjCook {
+				progress[i] = imax(0, progress[i]) + 1
+				changed = true
+			}
+		}
+		if changed {
+			w.sendQuestUpdate(p, questID)
+			if w.questCanTurnIn(p, qd) {
+				w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("["+qd.Name+"] Quest complete! Return to turn in."))
 			}
 		}
 	}
@@ -437,6 +714,9 @@ func (w *World) onExploreMap(p *Player, mapID int) {
 				if progress[i] < obj.Required {
 					progress[i]++
 					w.sendQuestUpdate(p, questID)
+					if w.questCanTurnIn(p, qd) {
+						w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("["+qd.Name+"] Quest complete! Return to turn in."))
+					}
 				}
 			}
 		}
@@ -454,6 +734,59 @@ func (w *World) countInInventory(p *Player, objIndex int) int {
 	return count
 }
 
+// countInInventoryByTypes counts inventory items whose obj_type is in the given set.
+func (w *World) countInInventoryByTypes(p *Player, objTypes []int) int {
+	if len(objTypes) == 0 {
+		return 0
+	}
+	typeSet := make(map[int]bool, len(objTypes))
+	for _, t := range objTypes {
+		typeSet[t] = true
+	}
+	count := 0
+	for _, slot := range p.Inventory {
+		if slot == nil {
+			continue
+		}
+		obj := w.gameData.GetObject(slot.ObjIndex)
+		if obj != nil && typeSet[obj.ObjType] {
+			count += slot.Amount
+		}
+	}
+	return count
+}
+
+// removeItemsFromInventoryByTypes removes `required` total items whose obj_type is in the set.
+func (w *World) removeItemsFromInventoryByTypes(p *Player, objTypes []int, required int) {
+	if len(objTypes) == 0 || required <= 0 {
+		return
+	}
+	typeSet := make(map[int]bool, len(objTypes))
+	for _, t := range objTypes {
+		typeSet[t] = true
+	}
+	remaining := required
+	for i, slot := range p.Inventory {
+		if remaining <= 0 {
+			break
+		}
+		if slot == nil {
+			continue
+		}
+		obj := w.gameData.GetObject(slot.ObjIndex)
+		if obj == nil || !typeSet[obj.ObjType] {
+			continue
+		}
+		if slot.Amount <= remaining {
+			remaining -= slot.Amount
+			p.Inventory[i] = nil
+		} else {
+			slot.Amount -= remaining
+			remaining = 0
+		}
+	}
+}
+
 // Player quest helpers.
 func (p *Player) hasActiveQuest(questID int) bool {
 	if p.ActiveQuests == nil {
@@ -468,4 +801,13 @@ func (p *Player) hasCompletedQuest(questID int) bool {
 		return false
 	}
 	return p.CompletedQuests[questID]
+}
+
+func (p *Player) hasAllPrereqsComplete(prereqs []int) bool {
+	for _, id := range prereqs {
+		if !p.hasCompletedQuest(id) {
+			return false
+		}
+	}
+	return true
 }

@@ -295,8 +295,14 @@ func (w *World) completeSkillAction(p *Player, ta *TimedAction) {
 
 	// Achievement and quest tracking based on action type.
 	switch ta.Action {
-	case "cook", "craft":
-		w.onCraftItem(p, 0) // also calls checkAchievements("craft") internally
+	case "cook":
+		w.onCookItem(p)
+	case "craft":
+		w.onCraftItem(p, "forge")
+	case "smelt":
+		w.onCraftItem(p, "smelt")
+	case "planks":
+		w.onCraftItem(p, "planks")
 	case "fish":
 		w.checkAchievements(p, "fish", 1)
 	}
