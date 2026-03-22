@@ -102,8 +102,12 @@ const PING_INTERVAL     : float = 5.0
 const TIMEOUT_SECS      : float = 30.0
 ## Reconnect delays (seconds) for up to 3 automatic retries.
 const RECONNECT_DELAYS  : Array = [1.0, 2.0, 4.0]
-## Must match SERVER_SECRET_STR in server_main.gd.
-const SERVER_SECRET_STR : String = "EraOnlineSecret2025ChangeInProd!"
+## Must match server.secret in server.yaml (used to derive session keys).
+const SERVER_SECRET_STR : String = "edd8389eff853f4c924c06e2d7bd874f3c8b17ba3f53803da6130650cca2c808"
+## Must match server.client_identity_secret in server.yaml.
+## The server verifies this during the handshake — prevents non-official clients.
+## Change this and update server.yaml whenever you release a new client binary.
+const CLIENT_IDENTITY_SECRET : String = "1490c6bf1917f84d6bb0b31e95ea60fa"
 
 
 # ---------------------------------------------------------------------------
@@ -120,12 +124,22 @@ enum State {
 	CONNECTED,         # In-world
 }
 
+## Official server — hardcoded, not user-configurable.
+const SERVER_IP   : String = "5.78.207.11"
+const SERVER_PORT : int    = 6969
+
 var state           : State  = State.DISCONNECTED
-var server_address  : String = "127.0.0.1"
-var server_port     : int    = DEFAULT_PORT
+var server_address  : String = SERVER_IP
+var server_port     : int    = SERVER_PORT
 var latency_ms      : int    = 0
 ## The local player's char_id as assigned by the server. 0 until authenticated.
 var local_char_id   : int    = 0
+
+## Launcher token — if set, sent via MsgAuthToken instead of username/password.
+## Populated by load_launcher_token() or set directly before connect_to_server().
+var launcher_token    : String = ""
+## Username associated with the launcher token (used for display in SplashUI).
+var launcher_username : String = ""
 
 var _tcp            : StreamPeerTCP  = null
 var _tls            : StreamPeerTLS  = null
@@ -194,6 +208,48 @@ func login(username: String, password: String) -> void:
 	w.write_str(password)
 	_send_preauth(NetProtocol.MsgType.AUTH_LOGIN, w.get_bytes())
 	state = State.AUTHENTICATING
+
+
+## Send a launcher pre-auth token instead of username/password.
+## Called automatically if launcher_token is set when PROTO_HANDSHAKE is reached.
+func login_with_token(token: String) -> void:
+	if state != State.PROTO_HANDSHAKE:
+		push_warning("[Network] login_with_token() called in wrong state: %s" % State.keys()[state])
+		return
+	var w := NetProtocol.PacketWriter.new()
+	w.write_str(token)
+	_send_preauth(NetProtocol.MsgType.AUTH_TOKEN, w.get_bytes())
+	state = State.AUTHENTICATING
+
+
+## Load a launcher token from user://session.dat.
+## File format (newline-separated):
+##   line 1: token string (64 hex chars)
+##   line 2: server host address (optional)
+##   line 3: TCP game port (optional)
+##   line 4: username (optional, for display)
+## Returns true if a valid token was found.
+## Also updates server_address, server_port, and launcher_username from the file.
+func load_launcher_token() -> bool:
+	launcher_token    = ""
+	launcher_username = ""
+	var f := FileAccess.open("user://session.dat", FileAccess.READ)
+	if f == null:
+		return false
+	var token  := f.get_line().strip_edges()
+	var addr   := f.get_line().strip_edges()
+	var port_s := f.get_line().strip_edges()
+	var uname  := f.get_line().strip_edges()
+	f.close()
+	if token.is_empty():
+		return false
+	launcher_token = token
+	# Server address and port are hardcoded — ignore any saved values.
+	server_address = SERVER_IP
+	server_port    = SERVER_PORT
+	if not uname.is_empty():
+		launcher_username = uname
+	return true
 
 
 func register_account(username: String, password: String) -> void:
@@ -625,12 +681,26 @@ func _dispatch_preauth(msg_type: int, payload: PackedByteArray) -> void:
 		NetProtocol.MsgType.SERVER_HELLO:
 			var version := r.read_u16()
 			_server_nonce = r.read_bytes(NetProtocol.NONCE_SIZE)
+			# Read server's client attestation challenge (new in Go server protocol).
+			var client_challenge := r.read_bytes(NetProtocol.NONCE_SIZE)
 			print("[Network] SERVER_HELLO v%d — sending CLIENT_HELLO" % version)
-			# Generate our nonce and reply
+			# Generate our nonce.
 			_client_nonce = Crypto.new().generate_random_bytes(NetProtocol.NONCE_SIZE)
+			# Compute client proof: HMAC-SHA256(CLIENT_IDENTITY_SECRET, challenge || server_nonce)[0:16]
+			var secret_bytes := CLIENT_IDENTITY_SECRET.to_utf8_buffer()
+			var msg := PackedByteArray()
+			msg.append_array(client_challenge)
+			msg.append_array(_server_nonce)
+			var client_proof := NetProtocol.hmac(secret_bytes, msg, NetProtocol.HMAC_SIZE)
 			var w := NetProtocol.PacketWriter.new()
 			w.write_bytes(_client_nonce)
+			w.write_bytes(client_proof)
 			_send_preauth(NetProtocol.MsgType.CLIENT_HELLO, w.get_bytes())
+			# If a launcher token is set, send it immediately after CLIENT_HELLO
+			# so LoginUI never needs to display.
+			if launcher_token != "":
+				print("[Network] Launcher token present — sending AUTH_TOKEN automatically")
+				login_with_token(launcher_token)
 
 		NetProtocol.MsgType.AUTH_OK:
 			_session_id   = r.read_str()

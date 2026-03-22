@@ -17,14 +17,9 @@ const C_RED    := Color(0.42, 0.12, 0.10, 0.80)
 const C_GREEN  := Color(0.12, 0.28, 0.08, 0.80)
 const C_GREEN_HV := Color(0.18, 0.40, 0.12, 0.88)
 
-## Set these before add_child() when launching from the official launcher.
+## Set before add_child() when launching from the official launcher.
 var _launcher_user: String = ""
-var _launcher_addr: String = "127.0.0.1"
-var _launcher_port: int    = 6969
 
-var _ip_panel:    Control  = null
-var _ip_field:    LineEdit = null
-var _port_field:  LineEdit = null
 var _status_lbl:  Label    = null
 const _OptionsUIClass = preload("res://scripts/ui/options_ui.gd")
 var _options_ui: Node = null
@@ -86,7 +81,7 @@ func _build() -> void:
 	if _launcher_user != "":
 		_build_launcher_panel(panel)
 	else:
-		_build_direct_panel(panel)
+		_build_direct_panel(panel)  # dev/skip-launcher mode only
 
 	# Version label (bottom-right of panel)
 	var ver := Label.new()
@@ -116,7 +111,7 @@ func _build_launcher_panel(panel: Control) -> void:
 	btn_play.size     = Vector2(380, 56)
 	btn_play.position = Vector2(110, 150)
 	panel.add_child(btn_play)
-	btn_play.pressed.connect(func(): online_requested.emit(_launcher_addr, _launcher_port))
+	btn_play.pressed.connect(func(): online_requested.emit(Network.SERVER_IP, Network.SERVER_PORT))
 
 	# "Options" button
 	var btn_options := _make_button("Options", C_BTN, C_BTN_HV)
@@ -133,93 +128,27 @@ func _build_launcher_panel(panel: Control) -> void:
 	btn_quit.pressed.connect(func(): get_tree().quit())
 
 
-## Layout when launched directly — ask for server address.
+## Layout when launched directly (dev --skip-launcher mode only).
+## Connects straight to the hardcoded server — no IP entry.
 func _build_direct_panel(panel: Control) -> void:
-	# "Play Online" button
 	var btn_online := _make_button("Play Online", Color(0.14, 0.28, 0.10, 0.80),
 		Color(0.20, 0.38, 0.13, 0.88))
 	btn_online.size     = Vector2(380, 52)
 	btn_online.position = Vector2(110, 150)
 	panel.add_child(btn_online)
-	btn_online.pressed.connect(_on_online_pressed)
+	btn_online.pressed.connect(func(): online_requested.emit(Network.SERVER_IP, Network.SERVER_PORT))
 
-	# "Options" button
 	var btn_options := _make_button("Options", C_BTN, C_BTN_HV)
 	btn_options.size     = Vector2(380, 40)
 	btn_options.position = Vector2(110, 214)
 	panel.add_child(btn_options)
 	btn_options.pressed.connect(_on_options_pressed)
 
-	# "Quit" button
 	var btn_quit := _make_button("Quit", C_RED, Color(C_RED.r + 0.1, C_RED.g, C_RED.b, 1.0))
 	btn_quit.size     = Vector2(380, 36)
 	btn_quit.position = Vector2(110, 264)
 	panel.add_child(btn_quit)
 	btn_quit.pressed.connect(func(): get_tree().quit())
-
-	# Status label
-	_status_lbl = Label.new()
-	_status_lbl.text = ""
-	_status_lbl.add_theme_font_size_override("font_size", 12)
-	_status_lbl.add_theme_color_override("font_color", C_RED)
-	_status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_status_lbl.size     = Vector2(580, 20)
-	_status_lbl.position = Vector2(10, 312)
-	panel.add_child(_status_lbl)
-
-	# IP entry sub-panel (hidden until "Play Online")
-	_ip_panel = _build_ip_panel(panel)
-	_ip_panel.visible = false
-
-
-func _build_ip_panel(parent: Control) -> Control:
-	var p := Panel.new()
-	p.size     = Vector2(400, 180)
-	p.position = Vector2(100, 155)
-	p.add_theme_stylebox_override("panel", _box(Color(0.06, 0.05, 0.02, 0.98), C_BORDER, 1))
-	parent.add_child(p)
-
-	var lbl := Label.new()
-	lbl.text = "Server Address"
-	lbl.add_theme_font_size_override("font_size", 13)
-	lbl.add_theme_color_override("font_color", C_TEXT)
-	lbl.size = Vector2(380, 20); lbl.position = Vector2(10, 12)
-	p.add_child(lbl)
-
-	_ip_field = LineEdit.new()
-	_ip_field.text        = "127.0.0.1"
-	_ip_field.size        = Vector2(280, 32)
-	_ip_field.position    = Vector2(10, 36)
-	_ip_field.placeholder_text = "Server IP"
-	p.add_child(_ip_field)
-
-	var port_lbl := Label.new()
-	port_lbl.text = "Port"
-	port_lbl.add_theme_font_size_override("font_size", 13)
-	port_lbl.add_theme_color_override("font_color", C_TEXT)
-	port_lbl.size = Vector2(80, 20); port_lbl.position = Vector2(300, 12)
-	p.add_child(port_lbl)
-
-	_port_field = LineEdit.new()
-	_port_field.text     = "6969"
-	_port_field.size     = Vector2(80, 32)
-	_port_field.position = Vector2(300, 36)
-	p.add_child(_port_field)
-
-	var confirm := _make_button("Connect", Color(0.14, 0.28, 0.10, 0.80),
-		Color(0.20, 0.38, 0.13, 0.88))
-	confirm.size     = Vector2(180, 44)
-	confirm.position = Vector2(10, 88)
-	p.add_child(confirm)
-	confirm.pressed.connect(_on_connect_confirm)
-
-	var cancel := _make_button("Cancel", C_BTN, C_BTN_HV)
-	cancel.size     = Vector2(180, 44)
-	cancel.position = Vector2(210, 88)
-	p.add_child(cancel)
-	cancel.pressed.connect(func(): _ip_panel.visible = false)
-
-	return p
 
 
 func _on_options_pressed() -> void:
@@ -227,25 +156,6 @@ func _on_options_pressed() -> void:
 		_options_ui = _OptionsUIClass.new()
 		add_child(_options_ui)
 	_options_ui.open()
-
-
-func _on_online_pressed() -> void:
-	_ip_panel.visible = true
-	_ip_field.grab_focus()
-
-
-func _on_connect_confirm() -> void:
-	var addr := _ip_field.text.strip_edges()
-	var port_str := _port_field.text.strip_edges()
-	if addr.is_empty():
-		_status_lbl.text = "Please enter a server address."
-		return
-	var port := int(port_str)
-	if port <= 0 or port > 65535:
-		_status_lbl.text = "Invalid port number."
-		return
-	_ip_panel.visible = false
-	online_requested.emit(addr, port)
 
 
 # ---------------------------------------------------------------------------

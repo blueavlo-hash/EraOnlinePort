@@ -1,6 +1,15 @@
 extends Node
 ## Era Online - Main Scene Entry Point
-## Detects --server flag to run headless, otherwise shows splash → login → char select → world.
+## Detects --server flag to run headless, otherwise shows launcher → (splash) → login → char select → world.
+##
+## CLI flags:
+##   --server               Run as headless game server.
+##   --editor               Open the map editor.
+##   --skip-launcher        Skip the launcher and go directly to the splash screen (dev mode).
+##   --username <name>      Pre-fill username on SplashUI (used with --skip-launcher).
+##   --token <tok>          Pre-fill auth token (used with --skip-launcher).
+##   --server-address <ip>  Server IP to pre-fill (used with --skip-launcher).
+##   --server-port <port>   TCP game port (default 6969).
 
 const WORLD_SCENE := "res://scenes/game/World.tscn"
 
@@ -27,12 +36,22 @@ func _ready() -> void:
 		_start_server()
 	elif "--editor" in args:
 		_start_editor()
-	else:
+	elif "--skip-launcher" in args:
+		# Developer shortcut — bypass launcher, connect to hardcoded server.
 		_prefill_user  = _get_arg(args, "--username")
 		_prefill_token = _get_arg(args, "--token")
-		var addr := _get_arg(args, "--server-address", "127.0.0.1")
-		var port := int(_get_arg(args, "--server-port", "6969"))
-		_show_splash(addr, port)
+		if _prefill_token != "":
+			Network.launcher_token = _prefill_token
+		_show_splash()
+	else:
+		# Normal startup — check for a saved launcher session first.
+		if Network.load_launcher_token():
+			print("[Main] Launcher token loaded from session.dat — skipping launcher UI")
+			_prefill_user = Network.launcher_username
+			_show_splash()
+		else:
+			# No token — show the full launcher for login / registration.
+			_show_launcher()
 
 
 func _get_arg(args: PackedStringArray, key: String, default_val: String = "") -> String:
@@ -64,13 +83,25 @@ func _start_editor() -> void:
 	queue_free()
 
 
-func _show_splash(addr: String = "127.0.0.1", port: int = 6969) -> void:
+func _show_launcher() -> void:
+	## Show the full launcher UI (login / register / play offline).
+	## The launcher handles its own scene transitions via get_tree().change_scene_to_file().
+	var packed := load("res://scenes/ui/LauncherUI.tscn") as PackedScene
+	if packed == null:
+		push_error("[Main] Could not load LauncherUI.tscn — falling back to splash")
+		_show_splash()
+		return
+	var launcher := packed.instantiate()
+	launcher.name = "LauncherUI"
+	get_tree().root.add_child(launcher)
+	queue_free()
+
+
+func _show_splash() -> void:
 	var splash := preload("res://scripts/ui/splash_ui.gd").new()
 	splash.name = "SplashUI"
 	if _prefill_user != "":
 		splash._launcher_user = _prefill_user
-		splash._launcher_addr = addr
-		splash._launcher_port = port
 	add_child(splash)
 	splash.online_requested.connect(
 		func(a: String, p: int): _on_online_requested(a, p, _prefill_user, _prefill_token)
