@@ -130,6 +130,7 @@ func (w *World) Run(ctx context.Context) error {
 
 	w.log.Info("world loop started", "tick_ms", w.cfg.TickRateMS)
 	w.spawnAllNPCs()
+	w.spawnHardcodedNPCs()
 
 	for {
 		select {
@@ -626,6 +627,28 @@ func (w *World) spawnAllNPCs() {
 		}
 	}
 	w.log.Info("spawned NPCs", "count", len(w.npcs))
+}
+
+func (w *World) spawnHardcodedNPCs() {
+	count := 0
+	for mapID, spawns := range w.gameData.HardcodedSpawns {
+		for _, s := range spawns {
+			var def *gamedata.NPCData
+			if s.Def != nil {
+				def = s.Def
+			} else if s.NpcIndex > 0 {
+				def = w.gameData.GetNPC(s.NpcIndex)
+			}
+			if def == nil {
+				continue
+			}
+			npc := NewNPC(w.nextNPCID, def, mapID, s.X, s.Y)
+			w.npcs[w.nextNPCID] = npc
+			w.nextNPCID++
+			count++
+		}
+	}
+	w.log.Info("spawned hardcoded NPCs", "count", count)
 }
 
 func (w *World) isTileWalkable(mapID, x, y int) bool {

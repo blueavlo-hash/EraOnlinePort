@@ -15,16 +15,29 @@ type GameData struct {
 	NPCs    map[int]*NPCData
 	Objects map[int]*ObjectData
 	Spells  map[int]*SpellData
+	// HardcodedSpawns: map_id → list of extra NPC spawns from npc_spawns.json.
+	HardcodedSpawns map[int][]HardcodedSpawn
+}
+
+// HardcodedSpawn is one entry from npc_spawns.json.
+// Either NpcIndex > 0 (reference existing NPC def) or Def is non-nil (inline def).
+type HardcodedSpawn struct {
+	X   int
+	Y   int
+	// One of these is set:
+	NpcIndex int      // reference to existing NPCData
+	Def      *NPCData // inline definition (custom NPC)
 }
 
 // Load reads all game data JSON files from the given directory.
 // Expected files: maps/map_N.json, npcs.json, objects.json, spells.json
 func Load(dir string) (*GameData, error) {
 	gd := &GameData{
-		Maps:    make(map[int]*MapData),
-		NPCs:    make(map[int]*NPCData),
-		Objects: make(map[int]*ObjectData),
-		Spells:  make(map[int]*SpellData),
+		Maps:            make(map[int]*MapData),
+		NPCs:            make(map[int]*NPCData),
+		Objects:         make(map[int]*ObjectData),
+		Spells:          make(map[int]*SpellData),
+		HardcodedSpawns: make(map[int][]HardcodedSpawn),
 	}
 
 	mapsDir := filepath.Join(dir, "maps")
@@ -73,6 +86,15 @@ func Load(dir string) (*GameData, error) {
 	}
 	for i := range spells {
 		gd.Spells[spells[i].Index] = &spells[i]
+	}
+
+	// Load npc_spawns.json (optional — missing file is not an error).
+	spawnsPath := filepath.Join(dir, "npc_spawns.json")
+	if _, statErr := os.Stat(spawnsPath); statErr == nil {
+		hardcoded, loadErr := loadNPCSpawns(spawnsPath, gd.NPCs)
+		if loadErr == nil {
+			gd.HardcodedSpawns = hardcoded
+		}
 	}
 
 	return gd, nil
@@ -374,4 +396,107 @@ func parseLeadingInt(s string) int {
 		}
 	}
 	return 0
+}
+
+// npcSpawnRaw is one entry in npc_spawns.json.
+// Fields for inline defs are parsed from float64 (JSON numbers).
+type npcSpawnRaw struct {
+	NpcIndex float64 `json:"npc_index"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	// Inline definition fields (only set when NpcIndex == 0).
+	Name       string    `json:"name"`
+	Body       float64   `json:"body"`
+	Head       float64   `json:"head"`
+	NPCType    float64   `json:"npc_type"`
+	WeaponAnim float64   `json:"weapon_anim"`
+	ShieldAnim float64   `json:"shield_anim"`
+	Hostile    float64   `json:"hostile"`
+	Attackable float64   `json:"attackable"`
+	MaxHP      float64   `json:"max_hp"`
+	Gold       float64   `json:"gold"`
+	Movement   float64   `json:"movement"`
+	Heading    float64   `json:"heading"`
+	Items      []float64 `json:"items"`
+}
+
+// inlineNPCBaseIndex is the starting pseudo-index for inline NPC definitions
+// (must not collide with real NPC indices, which top out at 535).
+const inlineNPCBaseIndex = 10000
+
+func loadNPCSpawns(path string, knownNPCs map[int]*NPCData) (map[int][]HardcodedSpawn, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var raw map[string][]npcSpawnRaw
+	if err := json.NewDecoder(f).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("npc_spawns.json decode: %w", err)
+	}
+
+	result := make(map[int][]HardcodedSpawn)
+	inlineIdx := inlineNPCBaseIndex
+
+	for mapKey, entries := range raw {
+		mapID, err := strconv.Atoi(mapKey)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			x := int(e.X)
+			y := int(e.Y)
+			if npcIdx := int(e.NpcIndex); npcIdx > 0 {
+				// Reference to an existing NPC definition.
+				if _, ok := knownNPCs[npcIdx]; ok {
+					result[mapID] = append(result[mapID], HardcodedSpawn{
+						X: x, Y: y, NpcIndex: npcIdx,
+					})
+				}
+			} else if e.Name != "" {
+				// Inline definition — build a synthetic NPCData.
+				maxHP := int(e.MaxHP)
+				if maxHP == 0 {
+					maxHP = 100
+				}
+				var shopItems [40]int
+				for i, item := range e.Items {
+					if i >= 40 {
+						break
+					}
+					shopItems[i] = int(item)
+				}
+				heading := int(e.Heading)
+				if heading == 0 {
+					heading = 3
+				}
+				def := &NPCData{
+					Index:      inlineIdx,
+					Name:       e.Name,
+					Body:       int(e.Body),
+					Head:       int(e.Head),
+					Heading:    heading,
+					NPCType:    int(e.NPCType),
+					WeaponAnim: int(e.WeaponAnim),
+					ShieldAnim: int(e.ShieldAnim),
+					Hostile:    e.Hostile != 0,
+					Attackable: e.Attackable != 0,
+					Movement:   int(e.Movement),
+					MinHP:      maxHP,
+					MaxHP:      maxHP,
+					Gold:       int(e.Gold),
+					Vendor:     len(e.Items) > 0,
+					ShopItems:  shopItems,
+				}
+				result[mapID] = append(result[mapID], HardcodedSpawn{
+					X: x, Y: y, Def: def,
+				})
+				// Register inline NPC in the global NPC map so GetNPC works.
+				knownNPCs[inlineIdx] = def
+				inlineIdx++
+			}
+		}
+	}
+	return result, nil
 }
