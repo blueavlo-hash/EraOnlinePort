@@ -353,6 +353,9 @@ func (w *World) handleJoin(connID uint64, info *JoinInfo) {
 			w.sendTo(p, proto.MsgSGroundItemAdd, wr.Bytes())
 		}
 	}
+
+	// Send quest indicators for NPCs on this map.
+	w.sendQuestIndicators(p)
 }
 
 // handleLeave removes a player from the world and persists their state.

@@ -41,9 +41,10 @@ func _ready() -> void:
 		_start_editor()
 	else:
 		var tok := _get_arg(args, "--token")
-		if tok != "":
+		if tok != "" and not Network.cli_token_used:
 			# Launched from official launcher — token passed as CLI arg.
 			Network.launcher_token = tok
+			Network.cli_token_used = true
 			_prefill_user = _get_arg(args, "--username")
 			_show_splash()
 		elif "--skip-launcher" in args:
@@ -192,13 +193,7 @@ func _on_enter_world(_map_id: int, _x: int, _y: int) -> void:
 
 func _load_world() -> void:
 	AudioManager.stop_music()
-	var packed := load(WORLD_SCENE) as PackedScene
-	if packed == null:
-		push_error("[Main] Could not load World scene: " + WORLD_SCENE)
-		return
-	var world := packed.instantiate()
-	get_tree().root.add_child(world)
-	queue_free()
+	get_tree().change_scene_to_file(WORLD_SCENE)
 
 
 func _print_summary() -> void:

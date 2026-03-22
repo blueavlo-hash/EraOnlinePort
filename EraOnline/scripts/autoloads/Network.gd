@@ -140,6 +140,9 @@ var local_char_id   : int    = 0
 var launcher_token    : String = ""
 ## Username associated with the launcher token (used for display in SplashUI).
 var launcher_username : String = ""
+## Set to true once the CLI --token arg has been consumed so that returning to
+## the main menu (scene reload) does not re-read the same already-used token.
+var cli_token_used    : bool   = false
 
 var _tcp            : StreamPeerTCP  = null
 var _tls            : StreamPeerTLS  = null
