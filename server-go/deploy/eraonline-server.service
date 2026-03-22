@@ -1,0 +1,103 @@
+[Unit]
+Description=Era Online Game Server
+Documentation=file:///opt/eraonline/deploy/README.md
+# Wait for the network stack to be fully up before starting.
+After=network-online.target
+Wants=network-online.target
+# If the SQLite WAL journal is on the same mount, ensure the filesystem is ready.
+After=local-fs.target
+
+[Service]
+Type=simple
+User=eraonline
+Group=eraonline
+WorkingDirectory=/opt/eraonline
+
+# Main process
+ExecStart=/opt/eraonline/eraonline-server --config /opt/eraonline/config/server.yaml
+# Send SIGHUP to reopen log files after logrotate
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart behaviour: always restart, with a 5-second back-off.
+# Allow at most 3 restarts within 60 seconds before systemd gives up.
+Restart=always
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+# -------------------------------------------------------------------------
+# Security hardening
+# -------------------------------------------------------------------------
+
+# Prevent the process from gaining new privileges via setuid/capabilities.
+NoNewPrivileges=true
+
+# Give the process its own private /tmp (isolated from other services).
+PrivateTmp=true
+
+# Mount /usr, /boot, /etc read-only. The server only needs to write to
+# its own data/logs/backups directories.
+ProtectSystem=strict
+
+# Explicitly grant write access to the directories the server needs.
+ReadWritePaths=/opt/eraonline/data /opt/eraonline/logs /opt/eraonline/backups
+
+# Block access to all real user home directories.
+ProtectHome=true
+
+# Prevent writing to kernel variables.
+ProtectKernelTunables=true
+
+# Prevent loading kernel modules.
+ProtectKernelModules=true
+
+# Prevent access to kernel log buffer.
+ProtectKernelLogs=true
+
+# Hide other processes from /proc.
+ProtectProc=invisible
+
+# Restrict the set of system calls this service may make to a safe subset.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Prevent the process from acquiring new capabilities.
+CapabilityBoundingSet=
+
+# Restrict address families to IPv4/IPv6 and Unix sockets only.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Prevent creating SUID/SGID files.
+RestrictSUIDSGID=true
+
+# Make all filesystems appear as if they have nosuid,nodev.
+MountFlags=slave
+
+# -------------------------------------------------------------------------
+# Resource limits
+# -------------------------------------------------------------------------
+
+# Allow one file descriptor per connection plus overhead.
+# 1000 players × 2 (read+write buffers) + 512 OS overhead
+LimitNOFILE=65536
+
+# Cap RSS memory at 512 MB. Adjust upward if you host more than 500 players
+# or have very large map data loaded.
+MemoryMax=1G
+
+# Soft CPU limit: log a warning if we exceed 90% of one core for 60s.
+# (Hard limit is not set — we don't want the OOM killer triggered by CPU.)
+CPUQuota=90%
+
+# -------------------------------------------------------------------------
+# Logging — write directly to files so logs survive journal restarts and
+# are accessible without journalctl. logrotate handles rotation.
+# -------------------------------------------------------------------------
+StandardOutput=append:/opt/eraonline/logs/server.log
+StandardError=append:/opt/eraonline/logs/error.log
+
+# Also tag messages sent to the journal (visible via journalctl -u eraonline-server)
+SyslogIdentifier=eraonline
+
+[Install]
+WantedBy=multi-user.target

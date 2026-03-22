@@ -1,0 +1,202 @@
+# =============================================================================
+#  Era Online Game Server — Configuration File
+# =============================================================================
+#
+# All durations are Go duration strings: 5s, 2m, 1h, etc.
+# All paths are relative to the server binary's working directory unless
+# they start with / (absolute paths are recommended in production).
+#
+# On first run the server creates data/eraonline.db and a self-signed TLS
+# certificate automatically. You only need to edit the REQUIRED fields below.
+#
+# Required before first deployment:
+#   server.secret                 (generate: openssl rand -hex 32)
+#   server.client_identity_secret (generate: openssl rand -hex 16)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Server (networking & authentication)
+# -----------------------------------------------------------------------------
+server:
+  # TCP bind address for the game binary protocol (TLS-wrapped).
+  # 0.0.0.0 listens on all interfaces. Use a specific IP to restrict access.
+  game_addr: ":6969"
+
+  # TCP bind address for the plain HTTP API (account registration, /status).
+  # In production, consider binding this to 127.0.0.1 if nginx is in front:
+  #   http_addr: "127.0.0.1:6970"
+  http_addr: ":6970"
+
+  # Maximum simultaneous connected players.
+  # Each connection uses ~8 KB of memory overhead. 500 players ≈ 4 MB.
+  max_players: 500
+
+  # *** MUST CHANGE BEFORE DEPLOYMENT ***
+  # Server-wide HMAC-SHA256 secret. Used to derive per-session authentication
+  # keys. Changing this after launch will invalidate all active sessions.
+  # Minimum 32 characters. Generate with: openssl rand -hex 32
+  secret: "edd8389eff853f4c924c06e2d7bd874f3c8b17ba3f53803da6130650cca2c808"
+
+  # *** MUST CHANGE BEFORE DEPLOYMENT ***
+  # Client identity secret — this value must also be set in the Godot client
+  # (Network.gd, constant CLIENT_IDENTITY_SECRET). Clients that send the wrong
+  # value are rejected at the TLS handshake stage before any auth is attempted.
+  # This is NOT a substitute for proper TLS but provides an easy first filter
+  # against random port scanners. Minimum 16 characters.
+  # Generate with: openssl rand -hex 16
+  client_identity_secret: "1490c6bf1917f84d6bb0b31e95ea60fa"
+
+  # Per-connection read timeout. Connections that send nothing for this long
+  # are closed. Increase for slow/mobile clients; decrease to shed idle load.
+  read_timeout: 30s
+
+  # Per-write timeout. If a single write blocks longer than this, the
+  # connection is closed (protects against slow clients stalling goroutines).
+  write_timeout: 10s
+
+  # Idle connection timeout. A player who hasn't sent any packet in this time
+  # window is disconnected (AFK protection / resource cleanup).
+  idle_timeout: 5m
+
+  # Number of failed authentication attempts before a source IP is locked out.
+  auth_lockout_attempts: 5
+
+  # Duration of the lockout window after too many failed auth attempts.
+  auth_lockout_duration: 60s
+
+# -----------------------------------------------------------------------------
+# TLS (game port only — the HTTP API does NOT use TLS)
+# -----------------------------------------------------------------------------
+tls:
+  # Path to TLS certificate (PEM format).
+  # Leave blank to auto-generate a self-signed certificate on first run.
+  # The auto-generated cert is stored in: data/tls-cert.pem
+  #
+  # For production with a real domain (recommended if clients connect by name):
+  #   1. apt install certbot
+  #   2. certbot certonly --standalone -d play.yourdomain.com
+  #   3. Uncomment and fill in the paths below.
+  #   4. Add a cron job or systemd timer to reload after renewal:
+  #        0 3 * * * systemctl kill --signal=HUP eraonline-server
+  #
+  cert_file: ""
+  #cert_file: /etc/letsencrypt/live/play.yourdomain.com/fullchain.pem
+
+  key_file: ""
+  #key_file: /etc/letsencrypt/live/play.yourdomain.com/privkey.pem
+
+# -----------------------------------------------------------------------------
+# Database (SQLite)
+# -----------------------------------------------------------------------------
+database:
+  # Path to the SQLite database file. Created automatically if it does not exist.
+  # Use an absolute path in production to avoid ambiguity:
+  #   path: /opt/eraonline/data/eraonline.db
+  path: "data/eraonline.db"
+
+  # Maximum number of concurrent open connections to SQLite.
+  # SQLite supports multiple readers but only one writer at a time.
+  # 4 is sufficient for most loads; increase only if you see write contention
+  # in the logs.
+  max_open_conns: 4
+
+  # How often to checkpoint the WAL journal back to the main database file.
+  # Lower values reduce crash-recovery window; higher values reduce I/O.
+  wal_checkpoint_interval: 5m
+
+# -----------------------------------------------------------------------------
+# Game world
+# -----------------------------------------------------------------------------
+game:
+  # World simulation tick rate in milliseconds.
+  # 250 ms = 4 ticks/second (matches the original VB6 server).
+  # Lowering this increases CPU usage but makes NPC AI more responsive.
+  tick_rate_ms: 250
+
+  # Combat attack cooldown in milliseconds.
+  # 4000 ms = one attack every 4 seconds (faithful to original).
+  combat_tick_ms: 4000
+
+  # Spawn point for new characters and respawning players.
+  spawn_map: 3
+  spawn_x: 50
+  spawn_y: 50
+
+  # Directory containing JSON game data files produced by the Python pipeline:
+  #   maps/map_1.json ... map_N.json
+  #   npcs.json, objects.json, spells.json, grh.json, etc.
+  #
+  # Relative path (development):
+  game_data_dir: "/opt/eraonline/data"
+  #
+  # Absolute path (production — set this after copying data to the VPS):
+  # game_data_dir: /opt/eraonline/data
+
+  # Minimum ambient brightness at night.
+  # 0.0 = completely dark, 1.0 = always full daylight.
+  night_brightness: 0.25
+
+  # Length of one in-game day in real-world seconds.
+  # 7200 = 2-hour day cycle (matches original).
+  day_length_seconds: 7200
+
+  # Maximum number of items a player may carry (inventory slots).
+  max_inventory_slots: 20
+
+  # Maximum number of spells a player may have learned.
+  max_spell_slots: 50
+
+  # Maximum distance (in tiles) from which a player can initiate melee combat.
+  melee_range_tiles: 1
+
+  # Maximum distance (in tiles) from which a player can cast a ranged spell.
+  spell_range_tiles: 15
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+log:
+  # Log verbosity level.
+  # In production "info" is recommended. Use "debug" only while troubleshooting
+  # (generates high volume, may expose sensitive data in request payloads).
+  # Options: debug, info, warn, error
+  level: info
+
+  # Log output format.
+  # "text"  — human-readable (good for tailing logs in a terminal)
+  # "json"  — structured JSON (good for log aggregation tools: Loki, Datadog, etc.)
+  format: text
+
+  # Log output file. Leave blank to write to stderr (captured by systemd to
+  # /opt/eraonline/logs/server.log via StandardOutput in the service unit).
+  # Only set this if you are NOT running under systemd.
+  file: ""
+
+# -----------------------------------------------------------------------------
+# Admin API (localhost only, disabled by default)
+# -----------------------------------------------------------------------------
+admin:
+  # Bind address. Keep this on loopback — never expose to 0.0.0.0 in production.
+  addr: "127.0.0.1:6971"
+
+  # Bearer token required in the Authorization header for all admin API calls.
+  # Leave blank to disable the admin API entirely (recommended if unused).
+  # Generate with: openssl rand -hex 24
+  token: ""
+  #token: "CHANGE_ME_ADMIN_API_TOKEN"
+
+# -----------------------------------------------------------------------------
+# Rate limiting (per-connection, token bucket)
+# -----------------------------------------------------------------------------
+rate_limit:
+  # Whether to enable per-message-type rate limiting.
+  enabled: true
+
+  # Global burst allowance: max packets per second across all types per connection.
+  global_burst: 60
+
+  # Per-type overrides (packets per second). Lower = stricter.
+  # These match the original client's normal send rates with headroom for lag.
+  move_rate:   8    # movement packets (client sends ~4/s normally)
+  combat_rate: 1    # attack packets (1 per combat_tick = 0.25/s normally)
+  chat_rate:   2    # chat messages (2/s is generous)
