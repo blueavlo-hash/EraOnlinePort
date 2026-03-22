@@ -308,7 +308,7 @@ async function loadNews() {
     list.innerHTML = `
       <div class="news-item">
         <div class="news-date">MARCH 2026</div>
-        <div class="news-title">v0.5.10-alpha — NPC Rendering, Damage & Trainers</div>
+        <div class="news-title">v0.5.10-alpha — NPC Rendering, Damage, Trainers & Auto-Update Fix</div>
         <div class="news-body">
           NPCs now render correctly when switching between maps. Player and NPC combat
           damage is fully live — equip a weapon and attack from your hotbar. Ability
@@ -612,6 +612,15 @@ document.getElementById('chk-remember').addEventListener('change', (e) => {
     if (data.phase) luStatus.textContent = data.phase
     const m = (data.phase || '').match(/(\d+)%/)
     if (m) luBar.style.width = m[1] + '%'
+    // If the update failed, dismiss overlay after 5s and proceed normally
+    if ((data.phase || '').startsWith('Update failed')) {
+      setTimeout(() => {
+        overlay.remove()
+        startup()
+        refreshStatus()
+        loadNews()
+      }, 5000)
+    }
   })
 
   // Absolute renderer-side fallback — if ANYTHING goes wrong for ANY reason,

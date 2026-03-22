@@ -1,6 +1,6 @@
 {
   "name": "era-online-launcher",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "Era Online Game Launcher",
   "main": "src/main.js",
   "scripts": {
@@ -23,7 +23,8 @@
       "oneClick": true,
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
-      "shortcutName": "Era Online"
+      "shortcutName": "Era Online",
+      "runAfterFinish": true
     },
     "files": [
       "src/**/*",
