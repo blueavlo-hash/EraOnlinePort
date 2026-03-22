@@ -39,14 +39,19 @@ func _ready() -> void:
 		_start_server()
 	elif "--editor" in args:
 		_start_editor()
-	elif "--skip-launcher" in args:
-		_prefill_user = _get_arg(args, "--username")
+	else:
 		var tok := _get_arg(args, "--token")
 		if tok != "":
+			# Launched from official launcher — token passed as CLI arg.
 			Network.launcher_token = tok
-		_show_splash()
-	else:
-		if Network.load_launcher_token():
+			_prefill_user = _get_arg(args, "--username")
+			_show_splash()
+		elif "--skip-launcher" in args:
+			# Dev shortcut — no token, show splash with direct Play button.
+			_prefill_user = _get_arg(args, "--username")
+			_show_splash()
+		elif Network.load_launcher_token():
+			# Legacy: token stored in session.dat.
 			print("[Main] Launcher token loaded — connecting in background")
 			_prefill_user = Network.launcher_username
 			_show_splash()
