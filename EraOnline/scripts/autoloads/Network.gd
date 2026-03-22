@@ -713,6 +713,8 @@ func _dispatch_preauth(msg_type: int, payload: PackedByteArray) -> void:
 			_send_seq = 0
 			_recv_seq = 0
 			state = State.CHAR_SELECT
+			# Token consumed — clear it so reconnects don't reuse it
+			launcher_token = ""
 			print("[Network] Auth OK as '%s' char_id=%d — awaiting char list" % [
 				char_name, local_char_id])
 
@@ -720,6 +722,11 @@ func _dispatch_preauth(msg_type: int, payload: PackedByteArray) -> void:
 			var reason := r.read_str()
 			push_warning("[Network] Auth failed: " + reason)
 			state = State.PROTO_HANDSHAKE
+			# If token was rejected, delete session.dat so next launch re-authenticates
+			if launcher_token != "":
+				launcher_token = ""
+				DirAccess.remove_absolute(
+					ProjectSettings.globalize_path("user://session.dat"))
 			auth_failed.emit(reason)
 
 		_:
