@@ -138,7 +138,7 @@ func (h *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	_, err := h.db.VerifyAccount(ctx, body.Username, body.Password)
+	account, err := h.db.VerifyAccount(ctx, body.Username, body.Password)
 	if err != nil {
 		switch err {
 		case db.ErrInvalidCredentials:
@@ -151,8 +151,29 @@ func (h *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	chars, err := h.db.ListChars(ctx, account.ID)
+	if err != nil {
+		h.log.Error("login: list chars error", "err", err)
+		chars = nil
+	}
+
+	type charJSON struct {
+		Name    string `json:"name"`
+		Level   int    `json:"level"`
+		ClassID int    `json:"class_id"`
+	}
+	charList := make([]charJSON, len(chars))
+	for i, c := range chars {
+		charList[i] = charJSON{Name: c.Name, Level: c.Level, ClassID: c.ClassID}
+	}
+
+	resp := map[string]any{
+		"ok":         true,
+		"username":   account.Username,
+		"characters": charList,
+	}
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, `{"ok":true}`)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *HTTPServer) handleAuthToken(w http.ResponseWriter, r *http.Request) {

@@ -146,6 +146,7 @@ func _ready() -> void:
 	_build_ui()
 	Network.char_created.connect(_on_char_created)
 	Network.char_deleted.connect(_on_char_deleted)
+	Network.char_list_received.connect(_on_char_list_received)
 
 
 func _collect_head_keys() -> void:
@@ -589,12 +590,16 @@ func _on_create_pressed() -> void:
 func _on_char_created(success: bool, reason: String) -> void:
 	_create_submit.disabled = false
 	if success:
-		# Server will send S_CHAR_LIST to refresh; hide panel for now
 		_create_panel.visible = false
-		_set_status("Character created! Entering world...")
+		_set_status("Character created! Select your character.")
 	else:
 		_create_status.text = reason
 		_create_status.add_theme_color_override("font_color", Color(0.75, 0.15, 0.10))
+
+
+func _on_char_list_received(chars: Array) -> void:
+	# Server refreshed the char list (e.g. after creation or deletion) — repopulate.
+	populate(chars)
 
 
 func _on_delete_pressed(slot_idx: int) -> void:
