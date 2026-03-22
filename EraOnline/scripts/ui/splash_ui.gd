@@ -85,7 +85,7 @@ func _build() -> void:
 
 	# Version label (bottom-right of panel)
 	var ver := Label.new()
-	ver.text = "v0.5.1-alpha"
+	ver.text = "v0.5.4-alpha"
 	ver.add_theme_font_size_override("font_size", 10)
 	ver.add_theme_color_override("font_color", C_DIM)
 	ver.size     = Vector2(580, 16)
