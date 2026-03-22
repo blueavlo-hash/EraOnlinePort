@@ -713,8 +713,12 @@ func _dispatch_preauth(msg_type: int, payload: PackedByteArray) -> void:
 			_send_seq = 0
 			_recv_seq = 0
 			state = State.CHAR_SELECT
-			# Token consumed — clear it so reconnects don't reuse it
+			# Token consumed — clear it and delete session.dat so that if the
+			# scene reloads (e.g. return from world) load_launcher_token() won't
+			# try to reuse this single-use token.
 			launcher_token = ""
+			DirAccess.remove_absolute(
+					ProjectSettings.globalize_path("user://session.dat"))
 			print("[Network] Auth OK as '%s' char_id=%d — awaiting char list" % [
 				char_name, local_char_id])
 
