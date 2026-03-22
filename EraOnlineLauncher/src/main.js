@@ -286,7 +286,7 @@ ipcMain.handle('get-server-status', (_event, host, port) => {
     socket.once('connect',  () => finish(true))
     socket.once('error',    () => finish(false))
     socket.once('timeout',  () => finish(false))
-    socket.connect(port || 7777, host || '127.0.0.1')
+    socket.connect(port || 6969, host || '5.78.207.11')
   })
 })
 
@@ -314,7 +314,7 @@ function gameApiPost(serverAddr, serverPort, path, bodyObj) {
   return new Promise((resolve) => {
     const bodyStr = JSON.stringify(bodyObj)
     const apiPort = (parseInt(serverPort) || 6969) + 1
-    const host    = serverAddr || '127.0.0.1'
+    const host    = serverAddr || '5.78.207.11'
     const options = {
       hostname: host,
       port:     apiPort,

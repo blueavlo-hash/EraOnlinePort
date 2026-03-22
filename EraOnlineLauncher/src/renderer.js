@@ -101,17 +101,9 @@ const api = window.launcher
 document.getElementById('btn-minimize').addEventListener('click', () => api.minimize())
 document.getElementById('btn-close').addEventListener('click',    () => api.close())
 
-// ---------------------------------------------------------------------------
-// Server toggle (custom server fields)
-// ---------------------------------------------------------------------------
-const serverToggle   = document.getElementById('server-toggle')
-const serverAdvanced = document.getElementById('server-advanced')
-serverToggle.addEventListener('click', () => {
-  serverAdvanced.classList.toggle('open')
-  serverToggle.textContent = serverAdvanced.classList.contains('open')
-    ? '▾ Custom server'
-    : '▸ Custom server'
-})
+// Server is hardcoded — no user-configurable address.
+const SERVER_ADDR = '5.78.207.11'
+const SERVER_PORT = 6969
 
 // ---------------------------------------------------------------------------
 // Footer links
@@ -174,9 +166,6 @@ async function doRegister() {
   const username = document.getElementById('inp-username').value.trim()
   const password = document.getElementById('inp-password').value
   const confirm  = document.getElementById('inp-confirm-password').value
-  const addr     = document.getElementById('inp-server-addr').value.trim() || '127.0.0.1'
-  const port     = parseInt(document.getElementById('server-port-input').value.trim()) || 6969
-
   if (!username) { setAuthStatus('Please enter a username.', '#ff6060'); return }
   if (!password) { setAuthStatus('Please enter a password.', '#ff6060'); return }
   if (password !== confirm) { setAuthStatus('Passwords do not match.', '#ff6060'); return }
@@ -185,7 +174,7 @@ async function doRegister() {
   playBtn.disabled = true
   setAuthStatus('Creating account...', 'var(--text-dim)')
 
-  const result = await api.registerAccount({ username, password, serverAddr: addr, serverPort: port })
+  const result = await api.registerAccount({ username, password, serverAddr: SERVER_ADDR, serverPort: SERVER_PORT })
 
   btnCreateAcct.disabled = false
   playBtn.disabled = false
@@ -287,10 +276,7 @@ async function refreshStatus() {
   text.textContent = 'Offline'
   extra.textContent = 'Checking...'
 
-  const addr = document.getElementById('inp-server-addr').value.trim() || '127.0.0.1'
-  const port = parseInt(document.getElementById('server-port-input').value.trim()) || 7777
-
-  const result = await api.getServerStatus(addr, port)
+  const result = await api.getServerStatus(SERVER_ADDR, SERVER_PORT)
   if (result.online) {
     dot.className = 'online'
     text.textContent = 'Online'
@@ -442,14 +428,12 @@ playBtn.addEventListener('click', async () => {
   setPlayBtn('launching')
   const username = document.getElementById('inp-username').value.trim()
   const password = document.getElementById('inp-password').value
-  const addr     = document.getElementById('inp-server-addr').value.trim() || '127.0.0.1'
-  const port     = parseInt(document.getElementById('server-port-input').value.trim()) || 6969
 
   const result = await api.launchGame({
     username:        username || null,
     token:           password || null,
-    serverAddress:   addr,
-    serverPort:      port,
+    serverAddress:   SERVER_ADDR,
+    serverPort:      SERVER_PORT,
     expectedVersion: _manifest?.version || null,
   })
 

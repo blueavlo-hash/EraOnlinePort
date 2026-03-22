@@ -36,6 +36,7 @@ enum MsgType {
 	AUTH_REGISTER  = 0x0011,  # C→S: username:str, password:str
 	AUTH_OK        = 0x0012,  # S→C: session_id:str, char_name:str
 	AUTH_FAIL      = 0x0013,  # S→C: reason:str
+	AUTH_TOKEN     = 0x0015,  # C→S: token:str (launcher pre-auth token, replaces AUTH_LOGIN)
 
 	## Client → Server (authenticated, HMAC-protected)
 	C_MOVE         = 0x0100,  # direction:u8 (1=N 2=E 3=S 4=W)

@@ -295,19 +295,6 @@ html, body {
 #status-text  { font-size: 12px; color: var(--text); }
 #status-extra { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 
-/* Server address (advanced) */
-#server-toggle {
-  font-size: 10px; color: var(--gold-dim);
-  cursor: pointer; text-decoration: underline;
-  margin-top: 8px; display: block;
-  letter-spacing: 1px;
-}
-#server-toggle:hover { color: var(--gold); }
-#server-advanced { display: none; margin-top: 8px; }
-#server-advanced.open { display: block; }
-#server-addr-row { display: flex; gap: 6px; }
-#server-addr-row .field-input { flex: 1; margin-bottom: 0; }
-#server-port-input { width: 58px !important; flex-shrink: 0; }
 
 /* ============================================================
    RIGHT: NEWS
@@ -537,14 +524,6 @@ html, body {
           <div id="status-text">Checking...</div>
         </div>
         <div id="status-extra"></div>
-        <span id="server-toggle">&#x25B8; Custom server</span>
-        <div id="server-advanced">
-          <div class="field-label" style="margin-bottom:4px">Address &amp; Port</div>
-          <div id="server-addr-row">
-            <input class="field-input" id="inp-server-addr" type="text" value="127.0.0.1" spellcheck="false">
-            <input class="field-input" id="server-port-input" type="text" value="6969">
-          </div>
-        </div>
       </div>
 
     </div>
