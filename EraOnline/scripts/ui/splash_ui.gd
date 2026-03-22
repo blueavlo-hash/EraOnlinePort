@@ -4,7 +4,7 @@ extends CanvasLayer
 ## When launched from the official launcher, shows "Logged in as [user]" + Play.
 ## When launched directly (no credentials), shows Play Online with IP entry.
 
-signal online_requested(address: String, port: int)
+signal play_pressed
 
 const C_PANEL  := Color(0.08, 0.06, 0.03, 0.96)
 const C_BORDER := Color(0.40, 0.30, 0.12, 1.0)
@@ -21,6 +21,7 @@ const C_GREEN_HV := Color(0.18, 0.40, 0.12, 0.88)
 var _launcher_user: String = ""
 
 var _status_lbl:  Label    = null
+var _play_btn:    Button   = null
 const _OptionsUIClass = preload("res://scripts/ui/options_ui.gd")
 var _options_ui: Node = null
 
@@ -95,6 +96,7 @@ func _build() -> void:
 
 
 ## Layout when launched from official launcher — credentials already provided.
+## Play starts disabled ("Connecting…"); main.gd calls set_ready() once auth'd.
 func _build_launcher_panel(panel: Control) -> void:
 	# "Logged in as [user]" label
 	var login_lbl := Label.new()
@@ -106,37 +108,65 @@ func _build_launcher_panel(panel: Control) -> void:
 	login_lbl.position = Vector2(10, 110)
 	panel.add_child(login_lbl)
 
-	# "Play" button
-	var btn_play := _make_button("Play", C_GREEN, C_GREEN_HV)
-	btn_play.size     = Vector2(380, 56)
-	btn_play.position = Vector2(110, 150)
-	panel.add_child(btn_play)
-	btn_play.pressed.connect(func(): online_requested.emit(Network.SERVER_IP, Network.SERVER_PORT))
+	# Status label (shows "Connecting…" / errors)
+	_status_lbl = Label.new()
+	_status_lbl.text = "Connecting to server…"
+	_status_lbl.add_theme_font_size_override("font_size", 12)
+	_status_lbl.add_theme_color_override("font_color", C_DIM)
+	_status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status_lbl.size     = Vector2(580, 36)
+	_status_lbl.position = Vector2(10, 144)
+	panel.add_child(_status_lbl)
+
+	# "Play" button — disabled until set_ready() is called
+	_play_btn = _make_button("Play", C_GREEN, C_GREEN_HV)
+	_play_btn.size     = Vector2(380, 56)
+	_play_btn.position = Vector2(110, 186)
+	_play_btn.disabled = true
+	panel.add_child(_play_btn)
+	_play_btn.pressed.connect(func(): play_pressed.emit())
 
 	# "Options" button
 	var btn_options := _make_button("Options", C_BTN, C_BTN_HV)
 	btn_options.size     = Vector2(380, 40)
-	btn_options.position = Vector2(110, 218)
+	btn_options.position = Vector2(110, 254)
 	panel.add_child(btn_options)
 	btn_options.pressed.connect(_on_options_pressed)
 
-	# "Quit" button
-	var btn_quit := _make_button("Quit", C_RED, Color(C_RED.r + 0.1, C_RED.g, C_RED.b, 1.0))
+	# "Exit" button
+	var btn_quit := _make_button("Exit", C_RED, Color(C_RED.r + 0.1, C_RED.g, C_RED.b, 1.0))
 	btn_quit.size     = Vector2(380, 36)
-	btn_quit.position = Vector2(110, 270)
+	btn_quit.position = Vector2(110, 306)
 	panel.add_child(btn_quit)
 	btn_quit.pressed.connect(func(): get_tree().quit())
 
 
+## Called by main.gd once the server has sent the char list — enables Play.
+func set_ready(_chars: Array = []) -> void:
+	if _status_lbl != null:
+		_status_lbl.text = ""
+	if _play_btn != null:
+		_play_btn.disabled = false
+
+
+## Called by main.gd on connection or auth failure.
+func set_error(msg: String) -> void:
+	if _status_lbl != null:
+		_status_lbl.add_theme_color_override("font_color", C_RED)
+		_status_lbl.text = msg
+	if _play_btn != null:
+		_play_btn.disabled = true
+
+
 ## Layout when launched directly (dev --skip-launcher mode only).
-## Connects straight to the hardcoded server — no IP entry.
 func _build_direct_panel(panel: Control) -> void:
 	var btn_online := _make_button("Play Online", Color(0.14, 0.28, 0.10, 0.80),
 		Color(0.20, 0.38, 0.13, 0.88))
 	btn_online.size     = Vector2(380, 52)
 	btn_online.position = Vector2(110, 150)
 	panel.add_child(btn_online)
-	btn_online.pressed.connect(func(): online_requested.emit(Network.SERVER_IP, Network.SERVER_PORT))
+	btn_online.pressed.connect(func(): play_pressed.emit())
 
 	var btn_options := _make_button("Options", C_BTN, C_BTN_HV)
 	btn_options.size     = Vector2(380, 40)
@@ -144,7 +174,7 @@ func _build_direct_panel(panel: Control) -> void:
 	panel.add_child(btn_options)
 	btn_options.pressed.connect(_on_options_pressed)
 
-	var btn_quit := _make_button("Quit", C_RED, Color(C_RED.r + 0.1, C_RED.g, C_RED.b, 1.0))
+	var btn_quit := _make_button("Exit", C_RED, Color(C_RED.r + 0.1, C_RED.g, C_RED.b, 1.0))
 	btn_quit.size     = Vector2(380, 36)
 	btn_quit.position = Vector2(110, 264)
 	panel.add_child(btn_quit)

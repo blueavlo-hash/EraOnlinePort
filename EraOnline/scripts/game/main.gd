@@ -1,20 +1,23 @@
 extends Node
 ## Era Online - Main Scene Entry Point
-## Detects --server flag to run headless, otherwise shows launcher → (splash) → login → char select → world.
+##
+## Launcher path:  token in session.dat → connect immediately in background →
+##                 SplashUI shows "Connecting…" → Play enables on char list →
+##                 CharSelectUI → World.
+##
+## Direct path:    no token → show in-game LauncherUI (login/register).
 ##
 ## CLI flags:
 ##   --server               Run as headless game server.
 ##   --editor               Open the map editor.
-##   --skip-launcher        Skip the launcher and go directly to the splash screen (dev mode).
-##   --username <name>      Pre-fill username on SplashUI (used with --skip-launcher).
+##   --skip-launcher        Dev shortcut: bypass launcher UI, uses --token if supplied.
+##   --username <name>      Pre-fill display name on SplashUI.
 ##   --token <tok>          Pre-fill auth token (used with --skip-launcher).
-##   --server-address <ip>  Server IP to pre-fill (used with --skip-launcher).
-##   --server-port <port>   TCP game port (default 6969).
 
 const WORLD_SCENE := "res://scenes/game/World.tscn"
 
 var _prefill_user:  String = ""
-var _prefill_token: String = ""
+var _pending_chars: Array  = []
 
 
 func _ready() -> void:
@@ -37,20 +40,17 @@ func _ready() -> void:
 	elif "--editor" in args:
 		_start_editor()
 	elif "--skip-launcher" in args:
-		# Developer shortcut — bypass launcher, connect to hardcoded server.
-		_prefill_user  = _get_arg(args, "--username")
-		_prefill_token = _get_arg(args, "--token")
-		if _prefill_token != "":
-			Network.launcher_token = _prefill_token
+		_prefill_user = _get_arg(args, "--username")
+		var tok := _get_arg(args, "--token")
+		if tok != "":
+			Network.launcher_token = tok
 		_show_splash()
 	else:
-		# Normal startup — check for a saved launcher session first.
 		if Network.load_launcher_token():
-			print("[Main] Launcher token loaded from session.dat — skipping launcher UI")
+			print("[Main] Launcher token loaded — connecting in background")
 			_prefill_user = Network.launcher_username
 			_show_splash()
 		else:
-			# No token — show the full launcher for login / registration.
 			_show_launcher()
 
 
@@ -70,7 +70,6 @@ func _start_server() -> void:
 	var srv = ServerScript.new()
 	srv.name = "GameServer"
 	add_child(srv)
-	# Server runs indefinitely; keep main alive as the scene root.
 
 
 func _start_editor() -> void:
@@ -84,12 +83,9 @@ func _start_editor() -> void:
 
 
 func _show_launcher() -> void:
-	## Show the full launcher UI (login / register / play offline).
-	## The launcher handles its own scene transitions via get_tree().change_scene_to_file().
 	var packed := load("res://scenes/ui/LauncherUI.tscn") as PackedScene
 	if packed == null:
-		push_error("[Main] Could not load LauncherUI.tscn — falling back to splash")
-		_show_splash()
+		push_error("[Main] Could not load LauncherUI.tscn")
 		return
 	var launcher := packed.instantiate()
 	launcher.name = "LauncherUI"
@@ -97,57 +93,89 @@ func _show_launcher() -> void:
 	queue_free()
 
 
+# ---------------------------------------------------------------------------
+# Splash / main menu
+# ---------------------------------------------------------------------------
+
 func _show_splash() -> void:
 	var splash := preload("res://scripts/ui/splash_ui.gd").new()
 	splash.name = "SplashUI"
 	if _prefill_user != "":
 		splash._launcher_user = _prefill_user
 	add_child(splash)
-	splash.online_requested.connect(
-		func(a: String, p: int): _on_online_requested(a, p, _prefill_user, _prefill_token)
-	)
+	splash.play_pressed.connect(_on_play_pressed)
+
+	if Network.launcher_token != "":
+		# Token present — connect immediately while the menu is visible.
+		# SplashUI starts with Play disabled ("Connecting…"); we enable it
+		# once the server sends the char list.
+		Network.char_list_received.connect(_on_char_list_received, CONNECT_ONE_SHOT)
+		Network.connection_failed.connect(_on_connect_failed, CONNECT_ONE_SHOT)
+		Network.auth_failed.connect(_on_auth_failed, CONNECT_ONE_SHOT)
+		Network.on_world_state.connect(_on_enter_world, CONNECT_ONE_SHOT)
+		Network.connect_to_server(Network.SERVER_IP, Network.SERVER_PORT)
+	else:
+		# No token (dev --skip-launcher without --token) — enable Play immediately;
+		# clicking it will connect and show login UI.
+		splash.set_ready([])
 
 
-# ---------------------------------------------------------------------------
-# Online flow
-# ---------------------------------------------------------------------------
-
-func _on_online_requested(address: String, port: int, prefill_user: String = "", prefill_token: String = "") -> void:
+func _on_char_list_received(chars: Array) -> void:
+	_pending_chars = chars
 	var splash := get_node_or_null("SplashUI")
-	if splash:
+	if is_instance_valid(splash):
+		splash.set_ready(chars)
+
+
+func _on_connect_failed(reason: String) -> void:
+	var splash := get_node_or_null("SplashUI")
+	if is_instance_valid(splash):
+		splash.set_error("Could not connect to server.\n" + reason)
+
+
+func _on_auth_failed(reason: String) -> void:
+	var splash := get_node_or_null("SplashUI")
+	if is_instance_valid(splash):
+		splash.set_error("Login failed — please reopen the launcher.\n(" + reason + ")")
+
+
+# ---------------------------------------------------------------------------
+# Play pressed on main menu
+# ---------------------------------------------------------------------------
+
+func _on_play_pressed() -> void:
+	var splash := get_node_or_null("SplashUI")
+	if is_instance_valid(splash):
 		splash.queue_free()
 
-	# Login UI (visible immediately — shows "Connecting…" until TLS ready)
-	var login_ui := preload("res://scripts/ui/login_ui.gd").new()
-	login_ui.name = "LoginUI"
-	add_child(login_ui)
-	if prefill_user != "" and prefill_token != "":
-		login_ui.set_auto_login(prefill_user, prefill_token)
+	if not _pending_chars.is_empty() or Network.state >= Network.State.CHAR_SELECT:
+		# Already authenticated — go straight to char select.
+		_show_char_select(_pending_chars)
+	else:
+		# No token / dev path — need to connect and login first.
+		var login_ui := preload("res://scripts/ui/login_ui.gd").new()
+		login_ui.name = "LoginUI"
+		add_child(login_ui)
+		Network.char_list_received.connect(
+			func(chars: Array):
+				if is_instance_valid(login_ui):
+					login_ui.queue_free()
+				_show_char_select(chars)
+		, CONNECT_ONE_SHOT)
+		if not (Network.state >= Network.State.CHAR_SELECT):
+			Network.on_world_state.connect(_on_enter_world, CONNECT_ONE_SHOT)
+			Network.connect_to_server(Network.SERVER_IP, Network.SERVER_PORT)
 
-	# Char select UI (hidden until char_list_received)
+
+func _show_char_select(chars: Array) -> void:
 	var char_ui := preload("res://scripts/ui/char_select_ui.gd").new()
-	char_ui.name    = "CharSelectUI"
-	char_ui.visible = false
+	char_ui.name = "CharSelectUI"
 	add_child(char_ui)
-
-	# Wire: auth success → hide login, show char select
-	Network.char_list_received.connect(
-		func(chars: Array):
-			if is_instance_valid(login_ui):
-				login_ui.queue_free()
-			if is_instance_valid(char_ui):
-				char_ui.populate(chars)
-	, CONNECT_ONE_SHOT)
-
-	# Wire: entering world → load world scene
-	Network.on_world_state.connect(_on_enter_world, CONNECT_ONE_SHOT)
-
-	# Start the connection
-	Network.connect_to_server(address, port)
+	char_ui.populate(chars)
 
 
 # ---------------------------------------------------------------------------
-# World entry (online)
+# World entry
 # ---------------------------------------------------------------------------
 
 func _on_enter_world(_map_id: int, _x: int, _y: int) -> void:
@@ -156,10 +184,6 @@ func _on_enter_world(_map_id: int, _x: int, _y: int) -> void:
 		char_ui.queue_free()
 	_load_world()
 
-
-# ---------------------------------------------------------------------------
-# Shared world loader
-# ---------------------------------------------------------------------------
 
 func _load_world() -> void:
 	AudioManager.stop_music()
