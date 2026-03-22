@@ -617,9 +617,9 @@ func (w *World) spawnAllNPCs() {
 			if npcDef == nil {
 				continue
 			}
-			// Parse "x,y" key.
+			// Parse "y,x" key (pipeline stores tiles as "y,x" to match VB6 loop order).
 			var x, y int
-			fmt.Sscanf(key, "%d,%d", &x, &y)
+			fmt.Sscanf(key, "%d,%d", &y, &x)
 			npc := NewNPC(w.nextNPCID, npcDef, mapData.ID, x, y)
 			w.npcs[w.nextNPCID] = npc
 			w.nextNPCID++
@@ -636,7 +636,7 @@ func (w *World) isTileWalkable(mapID, x, y int) bool {
 	if m == nil {
 		return false
 	}
-	tile, ok := m.Tiles[fmt.Sprintf("%d,%d", x, y)]
+	tile, ok := m.Tiles[fmt.Sprintf("%d,%d", y, x)]
 	if !ok {
 		return true // no tile data = walkable
 	}
