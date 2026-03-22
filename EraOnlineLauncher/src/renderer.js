@@ -155,7 +155,9 @@ function switchTab(toRegister) {
   if (toRegister) {
     playBtn.textContent = 'Create Account'
   } else {
-    setPlayBtn(_needsUpdate ? 'error' : (_manifest ? 'play' : 'checking'))
+    if (_needsUpdate) setPlayBtn('error')
+    else if (!_manifest) setPlayBtn('checking')
+    else setPlayBtn(_loggedIn ? 'play' : 'login')
   }
 }
 
@@ -230,6 +232,10 @@ function setPlayBtn(state) {
       playBtn.disabled = true
       playBtn.textContent = 'Downloading...'
       break
+    case 'login':
+      playBtn.disabled = false
+      playBtn.textContent = 'Login'
+      break
     case 'play':
       playBtn.disabled = false
       playBtn.textContent = 'Play'
@@ -302,18 +308,31 @@ async function loadNews() {
     list.innerHTML = `
       <div class="news-item">
         <div class="news-date">MARCH 2026</div>
-        <div class="news-title">v0.5.0-alpha — First Multiplayer Test</div>
+        <div class="news-title">v0.5.10-alpha — NPC Rendering, Damage & Trainers</div>
         <div class="news-body">
-          Directional melee, PK gold loot, dead body visuals, vendor fixes, and more.
-          Thanks to everyone who helped test!
+          NPCs now render correctly when switching between maps. Player and NPC combat
+          damage is fully live — equip a weapon and attack from your hotbar. Ability
+          trainers now open the skill shop when you interact. Launcher login button
+          now shows correctly before you sign in.
         </div>
       </div>
       <hr class="news-divider">
       <div class="news-item">
         <div class="news-date">MARCH 2026</div>
-        <div class="news-title">Launcher Live</div>
+        <div class="news-title">v0.5.8-alpha — Launcher Login & Char Creation</div>
         <div class="news-body">
-          The auto-updating launcher is now live. Future updates will download automatically.
+          Log in once from the launcher and stay logged in. Character creation now
+          refreshes the selection screen instantly. Quit-to-menu no longer leaves the
+          HUD on screen.
+        </div>
+      </div>
+      <hr class="news-divider">
+      <div class="news-item">
+        <div class="news-date">MARCH 2026</div>
+        <div class="news-title">v0.5.0-alpha — First Multiplayer Test</div>
+        <div class="news-body">
+          Directional melee, PK gold loot, dead body visuals, vendor fixes, and more.
+          The auto-updating launcher went live — future updates download automatically.
         </div>
       </div>
     `
@@ -365,7 +384,7 @@ async function startup() {
     await _autoInstall()
   } else {
     hideProgress()
-    setPlayBtn('play')
+    setPlayBtn(_loggedIn ? 'play' : 'login')
   }
 }
 
@@ -402,7 +421,7 @@ async function _autoInstall() {
     verTag.dataset.gameVersion = _manifest.version
     _updateVersionTag()
   }
-  setPlayBtn('play')
+  setPlayBtn(_loggedIn ? 'play' : 'login')
   toast('Era Online is ready!', 'success', 3000)
 }
 
@@ -439,7 +458,7 @@ function doLogout() {
   document.getElementById('loggedin-panel').style.display = 'none'
   document.getElementById('inp-password').value = ''
   setAuthStatus('')
-  if (_manifest && !_needsUpdate) setPlayBtn('play')
+  if (_manifest && !_needsUpdate) setPlayBtn('login')
 }
 
 document.getElementById('btn-switch-account').addEventListener('click', doLogout)
@@ -457,7 +476,7 @@ async function doLogin() {
   const result = await api.verifyAccount({ username, password, serverAddr: SERVER_ADDR, serverPort: SERVER_PORT })
 
   if (!result.ok) {
-    setPlayBtn(_manifest && !_needsUpdate ? 'play' : 'checking')
+    setPlayBtn(_manifest && !_needsUpdate ? 'login' : 'checking')
     setAuthStatus(result.error || 'Invalid username or password.', '#ff6060')
     return
   }

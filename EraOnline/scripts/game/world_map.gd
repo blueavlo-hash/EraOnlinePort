@@ -1412,7 +1412,21 @@ func _try_skill(skill_id: int) -> void:
 		return
 	# Melee / physical — fire immediately
 	if Network.state == Network.State.CONNECTED:
-		CombatSystem.use_skill(skill_id, -1)
+		# Find nearest attackable character within melee range (server validates range+type)
+		var best_id := -1
+		var best_dist := 999
+		for char_id in _chars:
+			if char_id == _player_idx:
+				continue
+			var c: CharData = _chars[char_id]
+			if not c.active:
+				continue
+			var d := maxi(abs(c.tile_pos.x - cam_tile.x), abs(c.tile_pos.y - cam_tile.y))
+			if d < best_dist:
+				best_dist = d
+				best_id = char_id
+		if best_id >= 0:
+			CombatSystem.use_skill(skill_id, best_id)
 		return
 	if _dummy_char == null or not _dummy_char.active:
 		return

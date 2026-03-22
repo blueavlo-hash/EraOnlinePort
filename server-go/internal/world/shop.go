@@ -13,7 +13,15 @@ func (w *World) handleShopOpen(p *Player, payload []byte) {
 		return
 	}
 	npc, ok := w.npcs[npcID]
-	if !ok || npc.MapID != p.MapID || !npc.Def.Vendor {
+	if !ok || npc.MapID != p.MapID {
+		return
+	}
+	// npc_type 4 = ability trainer — open ability shop instead of item shop.
+	if npc.Def.NPCType == 4 {
+		w.sendAbilityShop(p)
+		return
+	}
+	if !npc.Def.Vendor {
 		return
 	}
 	w.sendShopList(p, npc)
