@@ -32,6 +32,9 @@ type PoisonState struct {
 
 // tickVitals runs hunger/thirst decay and starvation for one player.
 func (w *World) tickVitals(p *Player) {
+	prevH := uint8(math.Round(p.Hunger))
+	prevT := uint8(math.Round(p.Thirst))
+
 	p.Hunger -= HungerDecayPerTick
 	p.Thirst -= ThirstDecayPerTick
 	if p.Hunger < 0 {
@@ -41,11 +44,15 @@ func (w *World) tickVitals(p *Player) {
 		p.Thirst = 0
 	}
 
-	// Send vitals update.
-	wr := proto.NewWriter(2)
-	wr.WriteU8(uint8(math.Round(p.Hunger)))
-	wr.WriteU8(uint8(math.Round(p.Thirst)))
-	w.sendTo(p, proto.MsgSVitals, wr.Bytes())
+	// Only send vitals update when the displayed integer value changes.
+	newH := uint8(math.Round(p.Hunger))
+	newT := uint8(math.Round(p.Thirst))
+	if newH != prevH || newT != prevT {
+		wr := proto.NewWriter(2)
+		wr.WriteU8(newH)
+		wr.WriteU8(newT)
+		w.sendTo(p, proto.MsgSVitals, wr.Bytes())
+	}
 
 	// Starvation damage.
 	worst := p.Hunger
@@ -96,7 +103,7 @@ func (w *World) tickPlayerRegen(p *Player) {
 
 	changed := false
 	if p.HP < p.MaxHP {
-		base := imax(1, p.MaxHP/20)
+		base := imax(1, p.MaxHP/40)
 		gain := imax(0, base+regenHPBonus)
 		if gain > 0 {
 			p.HP = imin(p.HP+gain, p.MaxHP)
@@ -104,7 +111,7 @@ func (w *World) tickPlayerRegen(p *Player) {
 		}
 	}
 	if p.MP < p.MaxMP {
-		base := imax(1, p.MaxMP/20)
+		base := imax(1, p.MaxMP/40)
 		gain := imax(0, base+regenMPBonus)
 		if gain > 0 {
 			p.MP = imin(p.MP+gain, p.MaxMP)
@@ -112,7 +119,7 @@ func (w *World) tickPlayerRegen(p *Player) {
 		}
 	}
 	if p.Stamina < p.MaxStamina {
-		base := imax(1, p.MaxStamina/20)
+		base := imax(1, p.MaxStamina/40)
 		p.Stamina = imin(p.Stamina+base, p.MaxStamina)
 		changed = true
 	}

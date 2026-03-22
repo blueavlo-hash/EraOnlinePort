@@ -125,8 +125,8 @@ func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, clas
 	}
 
 	_, err = db.sql.ExecContext(ctx,
-		`INSERT INTO characters (account_id, name, class_id, head_index, body_index)
-		 VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO characters (account_id, name, class_id, head_index, body_index, gold)
+		 VALUES (?, ?, ?, ?, ?, 500)`,
 		accountID, name, classID, head, body,
 	)
 	if err != nil {

@@ -81,6 +81,9 @@ type World struct {
 	raining      bool
 	weatherTicks int
 
+	// regenTicks counts world ticks; regen fires every 8 ticks (2 seconds).
+	regenTicks int
+
 	// Pending trade requests: target_instance_id → requester_instance_id.
 	pendingTrades map[int32]int32
 
@@ -113,6 +116,7 @@ func New(cfg Config, database *db.DB, gd *gamedata.GameData, log *slog.Logger) *
 		nextPlayerID:  1,
 		groundItems:   make(map[int16]*GroundItem),
 		pendingTrades: make(map[int32]int32),
+		gameMinutes:   480, // start at 8:00 AM so players don't spawn into darkness
 	}
 }
 
@@ -407,6 +411,8 @@ func (w *World) tick(timeIncPerTick float64, combatTicksPerAttack int) {
 	}
 
 	// Player vitals, regen, combat cooldown, and poison.
+	w.regenTicks++
+	runRegen := w.regenTicks%8 == 0 // regen fires every 8 ticks (2 seconds)
 	for _, p := range w.players {
 		// Decrement combat cooldown and clear InCombat when it reaches 0.
 		if p.CombatCooldown > 0 {
@@ -416,7 +422,9 @@ func (w *World) tick(timeIncPerTick float64, combatTicksPerAttack int) {
 			}
 		}
 		w.tickVitals(p)
-		w.tickPlayerRegen(p)
+		if runRegen {
+			w.tickPlayerRegen(p)
+		}
 	}
 	w.tickPoison()
 
