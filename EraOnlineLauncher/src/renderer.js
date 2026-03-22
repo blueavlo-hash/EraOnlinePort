@@ -407,43 +407,87 @@ async function _autoInstall() {
 }
 
 // ---------------------------------------------------------------------------
-// Play button — launches game in login mode, creates account in register mode
 // ---------------------------------------------------------------------------
-playBtn.addEventListener('click', async () => {
-  if (_isDownloading) return
+// Auth state
+// ---------------------------------------------------------------------------
+let _loggedIn   = false
+let _savedCreds = null  // { username, password }
 
-  // Register mode: delegate to registration flow
-  if (_isRegisterTab) {
-    await doRegister()
-    return
+function showLoggedIn(username, characters) {
+  _loggedIn = true
+  document.getElementById('login-panel').style.display     = 'none'
+  document.getElementById('loggedin-panel').style.display  = 'block'
+  document.getElementById('loggedin-name').textContent     = username
+
+  const charList = document.getElementById('char-list')
+  if (!characters || characters.length === 0) {
+    charList.innerHTML = '<div class="char-entry-empty">No characters yet</div>'
+  } else {
+    charList.innerHTML = characters.map(c =>
+      `<div class="char-entry"><span class="char-name">${c.name}</span><span class="char-level">Lv.${c.level}</span></div>`
+    ).join('')
   }
 
-  // Retry after failed download
-  if (_needsUpdate && _manifest) {
-    await _autoInstall()
-    return
-  }
+  if (_manifest && !_needsUpdate) setPlayBtn('play')
+}
 
-  // Launch
-  setPlayBtn('launching')
+function doLogout() {
+  _loggedIn   = false
+  _savedCreds = null
+  localStorage.removeItem('eo_creds')
+  document.getElementById('login-panel').style.display    = 'block'
+  document.getElementById('loggedin-panel').style.display = 'none'
+  document.getElementById('inp-password').value = ''
+  setAuthStatus('')
+  if (_manifest && !_needsUpdate) setPlayBtn('play')
+}
+
+document.getElementById('btn-switch-account').addEventListener('click', doLogout)
+
+async function doLogin() {
   const username = document.getElementById('inp-username').value.trim()
   const password = document.getElementById('inp-password').value
+  if (!username || !password) {
+    setAuthStatus('Enter your username and password.', '#ff6060')
+    return
+  }
+  setPlayBtn('launching')
+  setAuthStatus('Verifying...', 'var(--text-dim)')
 
-  // Get a real single-use auth token from the server before launching.
+  const result = await api.verifyAccount({ username, password, serverAddr: SERVER_ADDR, serverPort: SERVER_PORT })
+
+  if (!result.ok) {
+    setPlayBtn(_manifest && !_needsUpdate ? 'play' : 'checking')
+    setAuthStatus(result.error || 'Invalid username or password.', '#ff6060')
+    return
+  }
+
+  // Save credentials if remember me is checked
+  if (document.getElementById('chk-remember').checked) {
+    localStorage.setItem('eo_creds', JSON.stringify({ username, password }))
+  }
+  _savedCreds = { username, password }
+  showLoggedIn(result.username || username, result.characters || [])
+}
+
+async function doLaunch() {
+  if (!_savedCreds) { doLogout(); return }
+  setPlayBtn('launching')
+
   const tokenResult = await api.getAuthToken({
-    username:   username,
-    password:   password,
+    username:   _savedCreds.username,
+    password:   _savedCreds.password,
     serverAddr: SERVER_ADDR,
     serverPort: SERVER_PORT,
   })
   if (!tokenResult.ok) {
-    setPlayBtn('play')
-    toast('Login failed: ' + (tokenResult.error || tokenResult.message || 'Unknown error'), 'error')
+    toast('Session error — please log in again.', 'error')
+    doLogout()
     return
   }
 
   const result = await api.launchGame({
-    username:        username || null,
+    username:        _savedCreds.username,
     token:           tokenResult.token,
     serverAddress:   SERVER_ADDR,
     serverPort:      SERVER_PORT,
@@ -452,7 +496,6 @@ playBtn.addEventListener('click', async () => {
 
   if (!result.ok) {
     if (result.error && result.error.includes('not installed')) {
-      // Exe is missing — re-download automatically
       _needsUpdate = true
       await _autoInstall()
       return
@@ -463,42 +506,59 @@ playBtn.addEventListener('click', async () => {
   }
 
   toast('Launching Era Online...', 'success', 2000)
-  // Re-enable after a moment (launcher stays open)
   setTimeout(() => setPlayBtn('play'), 3000)
+}
+
+// ---------------------------------------------------------------------------
+// Play button — login on first click, launch on subsequent clicks
+// ---------------------------------------------------------------------------
+playBtn.addEventListener('click', async () => {
+  if (_isDownloading) return
+
+  if (_isRegisterTab) {
+    await doRegister()
+    return
+  }
+
+  if (_needsUpdate && _manifest) {
+    await _autoInstall()
+    return
+  }
+
+  if (_loggedIn) {
+    await doLaunch()
+  } else {
+    await doLogin()
+  }
 })
 
-// Also allow Enter in password field to trigger play
+// Enter in password field triggers play
 document.getElementById('inp-password').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !playBtn.disabled) playBtn.click()
 })
 
 // ---------------------------------------------------------------------------
-// Remember me (localStorage)
+// Remember me — restore saved credentials and auto-login on startup
 // ---------------------------------------------------------------------------
 ;(function loadSavedCreds() {
-  const saved = localStorage.getItem('eo_remember')
+  const saved = localStorage.getItem('eo_creds')
   if (!saved) return
   try {
-    const { username, remember } = JSON.parse(saved)
-    if (remember) {
-      document.getElementById('inp-username').value = username || ''
-      document.getElementById('chk-remember').checked = true
-    }
+    const { username, password } = JSON.parse(saved)
+    if (!username || !password) return
+    document.getElementById('inp-username').value  = username
+    document.getElementById('inp-password').value  = password
+    document.getElementById('chk-remember').checked = true
+    _savedCreds = { username, password }
+    // Auto-verify in background — show logged-in state if still valid
+    api.verifyAccount({ username, password, serverAddr: SERVER_ADDR, serverPort: SERVER_PORT })
+      .then(r => { if (r.ok) showLoggedIn(r.username || username, r.characters || []) })
+      .catch(() => {})
   } catch {}
 })()
 
 document.getElementById('chk-remember').addEventListener('change', (e) => {
-  if (!e.target.checked) {
-    localStorage.removeItem('eo_remember')
-  }
-})
-document.getElementById('inp-username').addEventListener('input', () => {
-  if (document.getElementById('chk-remember').checked) {
-    localStorage.setItem('eo_remember', JSON.stringify({
-      username: document.getElementById('inp-username').value,
-      remember: true,
-    }))
-  }
+  if (!e.target.checked) localStorage.removeItem('eo_creds')
 })
 
 // ---------------------------------------------------------------------------

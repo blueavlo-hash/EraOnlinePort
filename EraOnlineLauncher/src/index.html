@@ -266,6 +266,18 @@ html, body {
 #btn-create-account:disabled { opacity: 0.5; cursor: default; }
 
 /* Auth status message shown inside the login panel */
+/* Logged-in panel */
+#loggedin-panel { display: flex; flex-direction: column; gap: 8px; }
+#loggedin-greeting { font-size: 10px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; }
+#loggedin-name { font-size: 16px; color: var(--gold); font-weight: bold; margin-bottom: 2px; }
+#char-list { display: flex; flex-direction: column; gap: 4px; min-height: 20px; }
+.char-entry { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.04); border-radius: 3px; border: 1px solid rgba(102,77,30,0.3); }
+.char-name { color: var(--text); font-size: 12px; }
+.char-level { color: var(--gold-dim); font-size: 11px; }
+.char-entry-empty { color: var(--text-dim); font-size: 11px; font-style: italic; padding: 2px 0; }
+#btn-switch-account { background: transparent; border: 1px solid var(--border); color: var(--text-dim); padding: 4px 8px; border-radius: var(--radius); cursor: pointer; font-size: 11px; margin-top: 4px; transition: color 0.15s, border-color 0.15s; }
+#btn-switch-account:hover { color: var(--text); border-color: var(--gold-dim); }
+
 #auth-status {
   font-size: 11px;
   min-height: 16px;
@@ -495,6 +507,7 @@ html, body {
     <!-- Left: login + status -->
     <div id="left-col">
 
+      <!-- Login form (shown when not authenticated) -->
       <div class="panel" id="login-panel">
         <div class="tab-row">
           <button class="tab-btn active" id="tab-login-btn">Login</button>
@@ -515,6 +528,14 @@ html, body {
           <button id="btn-create-account">Create Account</button>
         </div>
         <div id="auth-status"></div>
+      </div>
+
+      <!-- Logged-in view (shown after successful login) -->
+      <div class="panel" id="loggedin-panel" style="display:none">
+        <div id="loggedin-greeting">Welcome back,</div>
+        <div id="loggedin-name">-</div>
+        <div id="char-list"></div>
+        <button id="btn-switch-account">Switch Account</button>
       </div>
 
       <div class="panel" id="status-panel">
