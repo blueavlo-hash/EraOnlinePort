@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('launcher', {
   // Account management (calls game server HTTP API)
   registerAccount: (opts) => ipcRenderer.invoke('register-account', opts),
   verifyAccount:   (opts) => ipcRenderer.invoke('verify-account',   opts),
+  getAuthToken:    (opts) => ipcRenderer.invoke('get-auth-token',   opts),
 
   // Launcher version
   getVersion: () => ipcRenderer.invoke('get-version'),

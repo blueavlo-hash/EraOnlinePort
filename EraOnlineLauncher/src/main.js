@@ -355,6 +355,13 @@ ipcMain.handle('verify-account', async (_event, { username, password, serverAddr
 })
 
 // ---------------------------------------------------------------------------
+// IPC: get a single-use launcher auth token from the game server
+// ---------------------------------------------------------------------------
+ipcMain.handle('get-auth-token', async (_event, { username, password, serverAddr, serverPort }) => {
+  return gameApiPost(serverAddr, serverPort, '/api/auth/token', { username, password })
+})
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 function fetchText(url, timeoutMs = 8000) {

@@ -429,9 +429,22 @@ playBtn.addEventListener('click', async () => {
   const username = document.getElementById('inp-username').value.trim()
   const password = document.getElementById('inp-password').value
 
+  // Get a real single-use auth token from the server before launching.
+  const tokenResult = await api.getAuthToken({
+    username:   username,
+    password:   password,
+    serverAddr: SERVER_ADDR,
+    serverPort: SERVER_PORT,
+  })
+  if (!tokenResult.ok) {
+    setPlayBtn('play')
+    toast('Login failed: ' + (tokenResult.error || tokenResult.message || 'Unknown error'), 'error')
+    return
+  }
+
   const result = await api.launchGame({
     username:        username || null,
-    token:           password || null,
+    token:           tokenResult.token,
     serverAddress:   SERVER_ADDR,
     serverPort:      SERVER_PORT,
     expectedVersion: _manifest?.version || null,

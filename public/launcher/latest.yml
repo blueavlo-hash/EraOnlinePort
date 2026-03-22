@@ -1,8 +1,8 @@
-version: 1.0.15
-path: https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.0-alpha/Era.Online.Launcher.Setup.1.0.15.exe
-sha512: eme+vFeyD+MjlHagb5uIxGCrSOqKgDBzfYvDdtshqROSn9ZQPuQUdocPd1wSRAd4b1qy+xVDXwDhvT8p49EUaw==
+version: 1.0.16
+path: https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.0-alpha/Era.Online.Launcher.Setup.1.0.16.exe
+sha512: FoZPm8lYfp/GeXgxy+QVq6ixi/OknvwiO8Dm2fM5JHEnhrTobn3WE78a4pHmQk9LP392qJB50xRvDUYOvsy42A==
 releaseDate: '2026-03-22T00:00:00.000Z'
 files:
-  - url: Era.Online.Launcher.Setup.1.0.15.exe
-    sha512: eme+vFeyD+MjlHagb5uIxGCrSOqKgDBzfYvDdtshqROSn9ZQPuQUdocPd1wSRAd4b1qy+xVDXwDhvT8p49EUaw==
-    size: 87367292
+  - url: Era.Online.Launcher.Setup.1.0.16.exe
+    sha512: FoZPm8lYfp/GeXgxy+QVq6ixi/OknvwiO8Dm2fM5JHEnhrTobn3WE78a4pHmQk9LP392qJB50xRvDUYOvsy42A==
+    size: 87367404
