@@ -155,7 +155,7 @@ func (w *World) handleSell(p *Player, payload []byte) {
 	}
 
 	obj := w.gameData.GetObject(item.ObjIndex)
-	if obj == nil || obj.Value <= 0 || !obj.Sellable {
+	if obj == nil || obj.Value <= 0 {
 		w.sendBuyResult(p, false, "That item cannot be sold.")
 		return
 	}

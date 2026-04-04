@@ -1,0 +1,4 @@
+filenames:
+  - /var/log/era-online/security.log
+labels:
+  type: eraonline-seclog

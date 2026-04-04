@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +17,46 @@ import (
 	"github.com/blueavlo-hash/eraonline-server/internal/gamedata"
 	"github.com/blueavlo-hash/eraonline-server/internal/proto"
 )
+
+// ---------------------------------------------------------------------------
+// Addiction loop definitions
+// ---------------------------------------------------------------------------
+
+type bossDef struct {
+	MapID         int
+	NPCIndex      int
+	Name          string
+	SpawnInterval float64 // seconds between spawns
+}
+
+var bossDefs = []bossDef{
+	{3,   47, "The Dark Stalker",   3600},
+	{18,  53, "The Alpha Wolf",     4500},
+	{80,  55, "The Iron Golem",     5400},
+	{115, 45, "The Serpent Queen",  6300},
+	{140, 51, "The Gremlin Warlord",7200},
+}
+
+// worldEventWaves maps map IDs to NPC indices that spawn during an invasion.
+var worldEventWaves = map[int][]int{
+	3:  {47, 47, 48, 48},
+	18: {53, 53, 47, 48},
+	80: {51, 51, 55, 47},
+}
+
+type tourneyScore struct {
+	Name      string
+	BestCatch int
+}
+
+const (
+	worldEventInterval = 3600.0 // seconds between world events
+	worldEventDuration = 300.0  // seconds an event lasts
+	tourneyInterval    = 7200.0 // seconds between tournaments
+	tourneyDuration    = 600.0  // seconds a tournament lasts
+)
+
+var tourneyPrizes = [3]int{1000, 500, 250}
 
 // ClientMsg is a message from a connection goroutine to the world goroutine.
 type ClientMsg struct {
@@ -81,7 +122,7 @@ type World struct {
 	raining      bool
 	weatherTicks int
 
-	// regenTicks counts world ticks; regen fires every 8 ticks (2 seconds).
+	// regenTicks counts world ticks; regen fires every 20 ticks (5 seconds).
 	regenTicks int
 
 	// Pending trade requests: target_instance_id → requester_instance_id.
@@ -89,6 +130,23 @@ type World struct {
 
 	// playerCount is updated atomically so the HTTP API can read it safely.
 	playerCount atomic.Int32
+
+	// Boss spawn state: mapID → seconds until next spawn / current instance ID.
+	bossTimers    map[int]float64
+	bossInstances map[int]int32 // 0 = not spawned
+
+	// World event state.
+	worldEventActive bool
+	worldEventMapID  int
+	worldEventNPCs   []int32
+	worldEventEndAt  float64 // unix seconds
+	worldEventAcc    float64 // accumulator in seconds
+
+	// Fishing tournament state.
+	tourneyActive bool
+	tourneyScores map[int32]tourneyScore // instanceID → best catch
+	tourneyEndAt  float64
+	tourneyAcc    float64
 }
 
 // GroundItem is a dropped item lying on the ground.
@@ -117,6 +175,9 @@ func New(cfg Config, database *db.DB, gd *gamedata.GameData, log *slog.Logger) *
 		groundItems:   make(map[int16]*GroundItem),
 		pendingTrades: make(map[int32]int32),
 		gameMinutes:   480, // start at 8:00 AM so players don't spawn into darkness
+		bossTimers:    make(map[int]float64),
+		bossInstances: make(map[int]int32),
+		tourneyScores: make(map[int32]tourneyScore),
 	}
 }
 
@@ -135,6 +196,7 @@ func (w *World) Run(ctx context.Context) error {
 	w.log.Info("world loop started", "tick_ms", w.cfg.TickRateMS)
 	w.spawnAllNPCs()
 	w.spawnHardcodedNPCs()
+	w.initBossTimers()
 
 	for {
 		select {
@@ -317,6 +379,26 @@ func (w *World) handleJoin(connID uint64, info *JoinInfo) {
 	// Send abilities.
 	w.sendTo(p, proto.MsgSAbilityList, p.BuildAbilityList())
 
+	// Send saved hotbar.
+	if hotbarSlots, err := w.db.LoadHotbar(context.Background(), p.charDBID); err == nil && len(hotbarSlots) > 0 {
+		wr := proto.NewWriter(4 + len(hotbarSlots)*3)
+		wr.WriteU8(uint8(len(hotbarSlots)))
+		for _, s := range hotbarSlots {
+			wr.WriteU8(uint8(s.Slot))
+			wr.WriteU8(uint8(s.ItemType))
+			wr.WriteU8(uint8(s.ItemID))
+		}
+		w.sendTo(p, proto.MsgSHotbar, wr.Bytes())
+	}
+
+	// Send initial vitals (hunger/thirst).
+	{
+		wr := proto.NewWriter(2)
+		wr.WriteU8(uint8(p.Hunger))
+		wr.WriteU8(uint8(p.Thirst))
+		w.sendTo(p, proto.MsgSVitals, wr.Bytes())
+	}
+
 	// Send time of day.
 	{
 		wr := proto.NewWriter(2)
@@ -360,6 +442,9 @@ func (w *World) handleJoin(connID uint64, info *JoinInfo) {
 
 	// Send quest indicators for NPCs on this map.
 	w.sendQuestIndicators(p)
+
+	// Daily login streak.
+	w.checkDailyLogin(p)
 }
 
 // handleLeave removes a player from the world and persists their state.
@@ -412,7 +497,7 @@ func (w *World) tick(timeIncPerTick float64, combatTicksPerAttack int) {
 
 	// Player vitals, regen, combat cooldown, and poison.
 	w.regenTicks++
-	runRegen := w.regenTicks%8 == 0 // regen fires every 8 ticks (2 seconds)
+	runRegen := w.regenTicks%20 == 0 // Gap 9: regen fires every 20 ticks (5 seconds)
 	for _, p := range w.players {
 		// Decrement combat cooldown and clear InCombat when it reaches 0.
 		if p.CombatCooldown > 0 {
@@ -448,11 +533,20 @@ func (w *World) tick(timeIncPerTick float64, combatTicksPerAttack int) {
 		w.weatherTicks = 0
 		w.tickWeather()
 	}
+
+	// Addiction loop timed systems.
+	deltaSec := float64(w.cfg.TickRateMS) / 1000.0
+	w.tickBosses(deltaSec)
+	w.tickWorldEvent(deltaSec)
+	w.tickTourney(deltaSec)
 }
 
 // tickNPC runs one AI step for an NPC.
 func (w *World) tickNPC(npc *NPC, combatTicksPerAttack int) {
 	if npc.Dead {
+		if npc.RespawnTicks < 0 {
+			return // boss/event NPC — managed externally
+		}
 		npc.RespawnTicks--
 		if npc.RespawnTicks <= 0 {
 			w.respawnNPC(npc)
@@ -472,7 +566,8 @@ func (w *World) tickNPC(npc *NPC, combatTicksPerAttack int) {
 			}
 			dx := p.X - npc.X
 			dy := p.Y - npc.Y
-			if dx*dx+dy*dy <= 9 { // aggro range = 3 tiles
+			// Gap 13: aggro range = 8 tiles (Chebyshev distance).
+			if iabs(dx) <= 8 && iabs(dy) <= 8 {
 				npc.Target = p.InstanceID
 				break
 			}
@@ -487,9 +582,11 @@ func (w *World) tickNPC(npc *NPC, combatTicksPerAttack int) {
 		} else {
 			dx := target.X - npc.X
 			dy := target.Y - npc.Y
-			if dx*dx+dy*dy <= 4 { // attack range = 2 tiles
+			// Attack range = 1 tile (Chebyshev).
+			if iabs(dx) <= 1 && iabs(dy) <= 1 {
 				w.npcAttackPlayer(npc, target)
-				npc.CombatCooldown = combatTicksPerAttack
+				// Gap 14: NPC attack cooldown = 6 ticks (1.5 seconds at 4 TPS).
+				npc.CombatCooldown = 6
 			} else {
 				// Chase target.
 				w.moveNPCToward(npc, target.X, target.Y)
@@ -536,6 +633,8 @@ func (w *World) npcAttackPlayer(npc *NPC, p *Player) {
 
 	if p.HP == 0 {
 		w.playerDied(p, npc.Def.Name)
+		// Gap 19: track death for the player.
+		w.checkAchievements(p, "deaths", 1)
 	}
 }
 
@@ -550,6 +649,36 @@ func (w *World) playerDied(p *Player, killerName string) {
 	// Capture old map BEFORE changing MapID.
 	oldMapID := p.MapID
 
+	// Gap 10: Drop ALL gold as a ground item at death location.
+	// Item 31 = Gold Coin in EO3 data.
+	if p.Gold > 0 {
+		w.spawnGroundItem(oldMapID, p.X, p.Y, 31 /* Gold Coin obj_index */, p.Gold)
+		p.Gold = 0
+	}
+
+	// Gap 10: Drop up to 3 random unequipped inventory items at death location.
+	var unequippedSlots []int
+	for i, slot := range p.Inventory {
+		if slot != nil && slot.ObjIndex > 0 && !slot.Equipped {
+			unequippedSlots = append(unequippedSlots, i)
+		}
+	}
+	// Shuffle to pick random items.
+	for i := len(unequippedSlots) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		unequippedSlots[i], unequippedSlots[j] = unequippedSlots[j], unequippedSlots[i]
+	}
+	dropCount := 3
+	if len(unequippedSlots) < dropCount {
+		dropCount = len(unequippedSlots)
+	}
+	for i := 0; i < dropCount; i++ {
+		si := unequippedSlots[i]
+		slot := p.Inventory[si]
+		w.spawnGroundItem(oldMapID, p.X, p.Y, slot.ObjIndex, slot.Amount)
+		p.Inventory[si] = nil
+	}
+
 	// Notify old map of removal BEFORE updating position.
 	w.broadcastMap(oldMapID, proto.MsgSRemoveChar, buildRemoveChar(p.InstanceID), p.InstanceID)
 
@@ -557,8 +686,10 @@ func (w *World) playerDied(p *Player, killerName string) {
 	p.MapID = w.cfg.SpawnMap
 	p.X = w.cfg.SpawnX
 	p.Y = w.cfg.SpawnY
-	p.HP = imax(1, p.MaxHP/2)
-	p.MP = imax(1, p.MaxMP/2)
+	// Gap 11: Respawn with FULL HP/MP/STA (not MaxHP/2).
+	p.HP = p.MaxHP
+	p.MP = p.MaxMP
+	p.Stamina = p.MaxStamina
 	p.InCombat = false
 	p.CombatCooldown = 0
 	p.Target = 0
@@ -572,9 +703,23 @@ func (w *World) playerDied(p *Player, killerName string) {
 		w.sendTo(p, proto.MsgSWorldState, wr2.Bytes())
 	}
 	w.sendTo(p, proto.MsgSStats, p.BuildStats())
+	w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
 
 	// Announce arrival on new map.
 	w.broadcastMap(p.MapID, proto.MsgSSetChar, p.BuildSetChar(), p.InstanceID)
+
+	// Send all existing players and NPCs on the spawn map to the respawning player.
+	for _, other := range w.players {
+		if other.InstanceID == p.InstanceID || other.MapID != p.MapID {
+			continue
+		}
+		w.sendTo(p, proto.MsgSSetChar, other.BuildSetChar())
+	}
+	for _, npc := range w.npcs {
+		if npc.MapID == p.MapID && !npc.Dead {
+			w.sendTo(p, proto.MsgSSetChar, npc.BuildSetChar())
+		}
+	}
 }
 
 func (w *World) respawnNPC(npc *NPC) {
@@ -717,4 +862,348 @@ func (w *World) saveAll(ctx context.Context) {
 // Safe to call from any goroutine.
 func (w *World) PlayerCount() int32 {
 	return w.playerCount.Load()
+}
+
+// ---------------------------------------------------------------------------
+// Boss spawns
+// ---------------------------------------------------------------------------
+
+func (w *World) initBossTimers() {
+	for _, bd := range bossDefs {
+		// Stagger initial spawns at 30–70% of interval.
+		delay := bd.SpawnInterval*0.3 + rand.Float64()*(bd.SpawnInterval*0.4)
+		w.bossTimers[bd.MapID] = delay
+		w.bossInstances[bd.MapID] = 0
+	}
+}
+
+func (w *World) tickBosses(delta float64) {
+	for _, bd := range bossDefs {
+		if w.bossInstances[bd.MapID] != 0 {
+			continue // already spawned
+		}
+		w.bossTimers[bd.MapID] -= delta
+		if w.bossTimers[bd.MapID] <= 0 {
+			w.trySpawnBoss(bd)
+		}
+	}
+}
+
+func (w *World) trySpawnBoss(bd bossDef) {
+	npcDef := w.gameData.GetNPC(bd.NPCIndex)
+	if npcDef == nil {
+		w.bossTimers[bd.MapID] = bd.SpawnInterval
+		return
+	}
+	// Pick a walkable spawn tile near map centre.
+	spawnX, spawnY := 50, 50
+	npc := NewNPC(w.nextNPCID, npcDef, bd.MapID, spawnX, spawnY)
+	npc.IsBoss = true
+	w.npcs[w.nextNPCID] = npc
+	w.bossInstances[bd.MapID] = w.nextNPCID
+	w.nextNPCID++
+
+	wr := proto.NewWriter(64)
+	wr.WriteStr(fmt.Sprintf("A powerful %s has appeared on map %d!", bd.Name, bd.MapID))
+	w.broadcastAll(proto.MsgSServerMsg, wr.Bytes())
+	w.broadcastMap(bd.MapID, proto.MsgSSetChar, npc.BuildSetChar(), -1)
+}
+
+// clearBossInstance checks if a dying NPC is a boss and resets its slot.
+// Returns true if it was a boss.
+func (w *World) clearBossInstance(instanceID int32) bool {
+	for mapID, nid := range w.bossInstances {
+		if nid == instanceID {
+			delete(w.bossInstances, mapID)
+			// Reset the timer for the next spawn.
+			for _, bd := range bossDefs {
+				if bd.MapID == mapID {
+					w.bossTimers[mapID] = bd.SpawnInterval
+					break
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// World events / invasions
+// ---------------------------------------------------------------------------
+
+func (w *World) tickWorldEvent(delta float64) {
+	if w.worldEventActive {
+		if time.Now().Unix() >= int64(w.worldEventEndAt) {
+			msg := "The invasion has been repelled!"
+			if len(w.worldEventNPCs) > 0 {
+				msg = "The monsters retreated into the darkness."
+			}
+			w.endWorldEvent(msg)
+		}
+		return
+	}
+	w.worldEventAcc += delta
+	if w.worldEventAcc >= worldEventInterval {
+		w.worldEventAcc = 0
+		w.startWorldEvent()
+	}
+}
+
+func (w *World) startWorldEvent() {
+	towns := []int{3, 18, 80}
+	mapID := towns[rand.Intn(len(towns))]
+	wave := worldEventWaves[mapID]
+	if len(wave) == 0 {
+		return
+	}
+
+	w.worldEventNPCs = w.worldEventNPCs[:0]
+	for _, npcIdx := range wave {
+		def := w.gameData.GetNPC(npcIdx)
+		if def == nil {
+			continue
+		}
+		spawnX := 40 + rand.Intn(20)
+		spawnY := 40 + rand.Intn(20)
+		npc := NewNPC(w.nextNPCID, def, mapID, spawnX, spawnY)
+		npc.IsEventNPC = true
+		w.npcs[w.nextNPCID] = npc
+		w.worldEventNPCs = append(w.worldEventNPCs, w.nextNPCID)
+		w.nextNPCID++
+		w.broadcastMap(mapID, proto.MsgSSetChar, npc.BuildSetChar(), -1)
+	}
+
+	w.worldEventActive = true
+	w.worldEventMapID = mapID
+	w.worldEventEndAt = float64(time.Now().Unix()) + worldEventDuration
+
+	wr := proto.NewWriter(32)
+	wr.WriteStr("Invasion!")
+	wr.WriteStr(fmt.Sprintf("Map %d", mapID))
+	w.broadcastAll(proto.MsgSWorldEventStart, wr.Bytes())
+
+	msg := proto.NewWriter(64)
+	msg.WriteStr(fmt.Sprintf("INVASION! Monsters are attacking on map %d! Defend the town!", mapID))
+	w.broadcastAll(proto.MsgSServerMsg, msg.Bytes())
+	w.log.Info("world event started", "map", mapID, "npcs", len(w.worldEventNPCs))
+}
+
+func (w *World) endWorldEvent(result string) {
+	// Remove any surviving event NPCs.
+	for _, nid := range w.worldEventNPCs {
+		npc, ok := w.npcs[nid]
+		if !ok {
+			continue
+		}
+		w.broadcastMap(npc.MapID, proto.MsgSRemoveChar, buildRemoveChar(nid), -1)
+		delete(w.npcs, nid)
+	}
+	w.worldEventNPCs = w.worldEventNPCs[:0]
+	w.worldEventActive = false
+
+	wr := proto.NewWriter(32)
+	wr.WriteStr("Invasion")
+	wr.WriteStr(result)
+	w.broadcastAll(proto.MsgSWorldEventEnd, wr.Bytes())
+
+	msg := proto.NewWriter(64)
+	msg.WriteStr(result)
+	w.broadcastAll(proto.MsgSServerMsg, msg.Bytes())
+	w.log.Info("world event ended", "result", result)
+}
+
+// onEventNPCDied removes an event NPC from the tracking slice and ends the
+// event early if all event NPCs have been killed.
+func (w *World) onEventNPCDied(instanceID int32) {
+	for i, nid := range w.worldEventNPCs {
+		if nid == instanceID {
+			w.worldEventNPCs = append(w.worldEventNPCs[:i], w.worldEventNPCs[i+1:]...)
+			break
+		}
+	}
+	if len(w.worldEventNPCs) == 0 && w.worldEventActive {
+		w.endWorldEvent("The town defenders were victorious! All monsters slain!")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fishing tournament
+// ---------------------------------------------------------------------------
+
+func (w *World) tickTourney(delta float64) {
+	if w.tourneyActive {
+		if time.Now().Unix() >= int64(w.tourneyEndAt) {
+			w.endFishingTourney()
+		}
+		return
+	}
+	w.tourneyAcc += delta
+	if w.tourneyAcc >= tourneyInterval {
+		w.tourneyAcc = 0
+		w.startFishingTourney()
+	}
+}
+
+func (w *World) startFishingTourney() {
+	w.tourneyActive = true
+	w.tourneyScores = make(map[int32]tourneyScore)
+	w.tourneyEndAt = float64(time.Now().Unix()) + tourneyDuration
+
+	wr := proto.NewWriter(16)
+	wr.WriteI32(int32(tourneyDuration))
+	wr.WriteStr(fmt.Sprintf("Grand Fishing Trophy + %d gold!", tourneyPrizes[0]))
+	w.broadcastAll(proto.MsgSTourneyStart, wr.Bytes())
+
+	msg := proto.NewWriter(64)
+	msg.WriteStr(fmt.Sprintf("FISHING TOURNAMENT STARTED! Best catch in 10 minutes wins %d gold!", tourneyPrizes[0]))
+	w.broadcastAll(proto.MsgSServerMsg, msg.Bytes())
+	w.log.Info("fishing tournament started")
+}
+
+func (w *World) recordTourneyCatch(p *Player, catchSize int) {
+	if !w.tourneyActive {
+		return
+	}
+	entry := w.tourneyScores[p.InstanceID]
+	if catchSize > entry.BestCatch {
+		entry.BestCatch = catchSize
+		entry.Name = p.CharName
+		w.tourneyScores[p.InstanceID] = entry
+	}
+	w.broadcastTourneyScores()
+}
+
+func (w *World) broadcastTourneyScores() {
+	type pair struct {
+		name  string
+		score int
+	}
+	var scores []pair
+	for _, e := range w.tourneyScores {
+		scores = append(scores, pair{e.Name, e.BestCatch})
+	}
+	sort.Slice(scores, func(i, j int) bool { return scores[i].score > scores[j].score })
+	top := 5
+	if len(scores) < top {
+		top = len(scores)
+	}
+	wr := proto.NewWriter(64)
+	wr.WriteU8(uint8(top))
+	for i := 0; i < top; i++ {
+		wr.WriteStr(scores[i].name)
+		wr.WriteI32(int32(scores[i].score))
+	}
+	w.broadcastAll(proto.MsgSTourneyScores, wr.Bytes())
+}
+
+func (w *World) endFishingTourney() {
+	w.tourneyActive = false
+
+	type entry struct {
+		instanceID int32
+		name       string
+		score      int
+	}
+	var scores []entry
+	for iid, e := range w.tourneyScores {
+		scores = append(scores, entry{iid, e.Name, e.BestCatch})
+	}
+	sort.Slice(scores, func(i, j int) bool { return scores[i].score > scores[j].score })
+
+	awardCount := len(tourneyPrizes)
+	if len(scores) < awardCount {
+		awardCount = len(scores)
+	}
+
+	wr := proto.NewWriter(64)
+	wr.WriteU8(uint8(awardCount))
+	var winnerMsgs []string
+	places := []string{"1st", "2nd", "3rd"}
+	for i := 0; i < awardCount; i++ {
+		e := scores[i]
+		prize := tourneyPrizes[i]
+		wr.WriteStr(e.name)
+		wr.WriteI32(int32(e.score))
+		wr.WriteI32(int32(prize))
+		winnerMsgs = append(winnerMsgs, fmt.Sprintf("%s: %s (%d)", places[i], e.name, e.score))
+		// Award gold to online winner.
+		if p, ok := w.players[e.instanceID]; ok {
+			p.Gold += prize
+			w.sendTo(p, proto.MsgSStats, p.BuildStats())
+			w.sendTo(p, proto.MsgSServerMsg,
+				buildServerMsg(fmt.Sprintf("You placed %s in the Fishing Tournament! Prize: %d gold!", places[i], prize)))
+		}
+	}
+	w.broadcastAll(proto.MsgSTourneyEnd, wr.Bytes())
+
+	result := "Fishing Tournament Over!"
+	if len(winnerMsgs) > 0 {
+		result += " " + winnerMsgs[0]
+		for _, m := range winnerMsgs[1:] {
+			result += ", " + m
+		}
+	} else {
+		result += " No participants."
+	}
+	msg := proto.NewWriter(64)
+	msg.WriteStr(result)
+	w.broadcastAll(proto.MsgSServerMsg, msg.Bytes())
+
+	w.tourneyScores = make(map[int32]tourneyScore)
+	w.log.Info("fishing tournament ended")
+}
+
+// ---------------------------------------------------------------------------
+// Daily login streak
+// ---------------------------------------------------------------------------
+
+func (w *World) checkDailyLogin(p *Player) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	today := time.Now().UTC().Format("2006-01-02")
+	streak, lastDate, err := w.db.GetLoginStreak(ctx, p.AccountID)
+	if err != nil {
+		w.log.Warn("failed to load login streak", "char", p.CharName, "err", err)
+		return
+	}
+	if lastDate == today {
+		return // already rewarded today
+	}
+
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+	if lastDate != yesterday {
+		streak = 0 // streak broken
+	}
+	streak++
+	if streak > 7 {
+		streak = 7
+	}
+
+	rewards := [7]struct {
+		gold int
+		msg  string
+	}{
+		{50, "Day 1 login bonus: 50 gold!"},
+		{75, "Day 2 streak: 75 gold!"},
+		{100, "Day 3 streak: 100 gold!"},
+		{125, "Day 4 streak: 125 gold!"},
+		{150, "Day 5 streak: 150 gold!"},
+		{200, "Day 6 streak: 200 gold!"},
+		{500, "7-DAY STREAK! 500 gold reward! Keep it up!"},
+	}
+	r := rewards[streak-1]
+	p.Gold += r.gold
+
+	wr := proto.NewWriter(32)
+	wr.WriteU8(uint8(streak))
+	wr.WriteI32(int32(r.gold))
+	wr.WriteStr(r.msg)
+	w.sendTo(p, proto.MsgSLoginReward, wr.Bytes())
+	w.sendTo(p, proto.MsgSStats, p.BuildStats())
+
+	if err := w.db.SetLoginStreak(ctx, p.AccountID, streak, today); err != nil {
+		w.log.Warn("failed to save login streak", "char", p.CharName, "err", err)
+	}
 }

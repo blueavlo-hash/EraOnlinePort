@@ -7,12 +7,14 @@ import (
 	"github.com/blueavlo-hash/eraonline-server/internal/proto"
 )
 
-// Vitals constants (mirrored from game_server.gd)
+// Vitals constants (mirrored from original EO3 GDScript server)
 const (
-	HungerDecayPerTick    = 0.01  // hunger lost per world tick
-	ThirstDecayPerTick    = 0.012 // thirst lost per world tick (slightly faster)
-	StarvationDmgInterval = 240   // ticks between starvation damage (60s at 4 tps)
-	StarvationDmgAmt      = 1     // HP lost per starvation interval
+	// Gap 6: original decay was 0.139 hunger / 0.093 thirst per 5-second regen
+	// interval (20 ticks at 4 TPS = 250ms tick).
+	HungerDecayPerTick    = 0.00695 // 0.139 / 20 ticks
+	ThirstDecayPerTick    = 0.00465 // 0.093 / 20 ticks
+	StarvationDmgInterval = 140     // Gap 8: 35 seconds = 140 ticks at 4 TPS (not 240)
+	StarvationDmgAmt      = 1       // HP lost per starvation interval
 
 	PoisonTickDmg    = 1
 	PoisonDurationMs = 60000 // 60s
@@ -79,47 +81,44 @@ func (w *World) tickVitals(p *Player) {
 }
 
 // tickPlayerRegen regenerates HP/MP/STA based on vitals.
+// Regen is gated behind vitals — you must stay fed and hydrated to heal.
+// Rates are intentionally slow to keep combat dangerous.
 func (w *World) tickPlayerRegen(p *Player) {
-	// Vitals-based regen modifier.
-	regenHPBonus := 0
-	regenMPBonus := 0
 	worst := p.Hunger
 	if p.Thirst < worst {
 		worst = p.Thirst
 	}
-	switch {
-	case p.Hunger >= 75 && p.Thirst >= 75:
-		regenHPBonus = 2
-		regenMPBonus = 1
-	case p.Hunger >= 50 && p.Thirst >= 50:
-		regenHPBonus = 1
-	case worst < 25:
-		// No regen when critically hungry/thirsty.
-		regenHPBonus = -999
-		regenMPBonus = -999
-	case worst < 50:
-		regenHPBonus -= 2
+
+	// No regen at all when critically hungry/thirsty or in active combat.
+	if worst < 25 || p.InCombat {
+		return
+	}
+	// No regen when low on vitals.
+	if worst < 50 {
+		return
 	}
 
+	// Base regen: MaxHP/100 per 5s tick — very slow, full recovery ~8 min.
+	// Well fed (both >= 75) bumps it to MaxHP/60 — still slow, ~5 min.
 	changed := false
 	if p.HP < p.MaxHP {
-		base := imax(1, p.MaxHP/40)
-		gain := imax(0, base+regenHPBonus)
-		if gain > 0 {
-			p.HP = imin(p.HP+gain, p.MaxHP)
-			changed = true
+		base := imax(1, p.MaxHP/100)
+		if p.Hunger >= 75 && p.Thirst >= 75 {
+			base = imax(1, p.MaxHP/60)
 		}
+		p.HP = imin(p.HP+base, p.MaxHP)
+		changed = true
 	}
 	if p.MP < p.MaxMP {
-		base := imax(1, p.MaxMP/40)
-		gain := imax(0, base+regenMPBonus)
-		if gain > 0 {
-			p.MP = imin(p.MP+gain, p.MaxMP)
-			changed = true
+		base := imax(1, p.MaxMP/100)
+		if p.Hunger >= 75 && p.Thirst >= 75 {
+			base = imax(1, p.MaxMP/60)
 		}
+		p.MP = imin(p.MP+base, p.MaxMP)
+		changed = true
 	}
 	if p.Stamina < p.MaxStamina {
-		base := imax(1, p.MaxStamina/40)
+		base := imax(1, p.MaxStamina/80)
 		p.Stamina = imin(p.Stamina+base, p.MaxStamina)
 		changed = true
 	}

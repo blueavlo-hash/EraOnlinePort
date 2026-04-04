@@ -69,6 +69,10 @@ type CharData struct {
 
 	// Achievements
 	AchievementIDs []int
+
+	// Addiction loop persistence.
+	Bounty      int
+	ActiveTitle string
 }
 
 // InventorySlot represents one character inventory entry.
@@ -110,6 +114,30 @@ func (db *DB) ListChars(ctx context.Context, accountID int64) ([]CharSummary, er
 	return chars, rows.Err()
 }
 
+// Class ID constants (used for starting equipment; duplicated to avoid import cycle).
+const (
+	dbClassWarrior = 1
+	dbClassMage    = 2
+	dbClassRogue   = 3
+	dbClassArcher  = 4
+)
+
+// startItem is one item given to a newly created character.
+type startItem struct {
+	ObjIndex int
+	Amount   int
+	Equipped bool
+}
+
+// classStartItems defines per-class starting inventory.
+// Gap 23: Archer receives Hunter's Bow (item 23) equipped + Pile of Arrows (item 87) qty 50.
+var classStartItems = map[int][]startItem{
+	dbClassArcher: {
+		{ObjIndex: 23, Amount: 1, Equipped: true},  // Hunter's Bow
+		{ObjIndex: 87, Amount: 50, Equipped: false}, // Pile of Arrows
+	},
+}
+
 // CreateChar creates a new character for the given account.
 func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, classID, head, body int) error {
 	// Enforce 3-char limit.
@@ -124,10 +152,23 @@ func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, clas
 		return ErrTooManyChars
 	}
 
-	_, err = db.sql.ExecContext(ctx,
-		`INSERT INTO characters (account_id, name, class_id, head_index, body_index, gold)
-		 VALUES (?, ?, ?, ?, ?, 500)`,
-		accountID, name, classID, head, body,
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Determine weapon_slot for classes that start with an equipped weapon.
+	weaponSlot := 0
+	if classID == dbClassArcher {
+		weaponSlot = 23 // Hunter's Bow obj_index (Gap 23)
+	}
+
+	res, err := tx.ExecContext(ctx,
+		// Gap 7: starting hunger and thirst = 80 (not 100).
+		`INSERT INTO characters (account_id, name, class_id, head_index, body_index, gold, hunger, thirst, weapon_slot)
+		 VALUES (?, ?, ?, ?, ?, 500, 80, 80, ?)`,
+		accountID, name, classID, head, body, weaponSlot,
 	)
 	if err != nil {
 		if isConstraintErr(err) {
@@ -135,7 +176,29 @@ func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, clas
 		}
 		return fmt.Errorf("create char: %w", err)
 	}
-	return nil
+
+	charID, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+
+	// Gap 23: Give class-specific starting items.
+	if items, ok := classStartItems[classID]; ok {
+		for slot, si := range items {
+			eq := 0
+			if si.Equipped {
+				eq = 1
+			}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO inventory (character_id, slot, obj_index, amount, equipped, enchant) VALUES (?,?,?,?,?,0)`,
+				charID, slot, si.ObjIndex, si.Amount, eq,
+			); err != nil {
+				return fmt.Errorf("create char starting inventory: %w", err)
+			}
+		}
+	}
+
+	return tx.Commit()
 }
 
 // LoadChar loads a full character by name, verifying it belongs to accountID.
@@ -147,7 +210,7 @@ func (db *DB) LoadChar(ctx context.Context, accountID int64, name string) (*Char
 		       hp, max_hp, mp, max_mp, stamina, max_stamina,
 		       gold, head_index, body_index,
 		       weapon_slot, shield_slot, helmet_slot, armor_slot,
-		       hunger, thirst
+		       hunger, thirst, bounty, active_title
 		FROM characters
 		WHERE name = ? COLLATE NOCASE AND account_id = ?`,
 		name, accountID,
@@ -157,7 +220,7 @@ func (db *DB) LoadChar(ctx context.Context, accountID int64, name string) (*Char
 		&c.HP, &c.MaxHP, &c.MP, &c.MaxMP, &c.Stamina, &c.MaxStamina,
 		&c.Gold, &c.HeadIndex, &c.BodyIndex,
 		&c.WeaponSlot, &c.ShieldSlot, &c.HelmetSlot, &c.ArmorSlot,
-		&c.Hunger, &c.Thirst,
+		&c.Hunger, &c.Thirst, &c.Bounty, &c.ActiveTitle,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCharNotFound
@@ -359,12 +422,12 @@ func (db *DB) SaveChar(ctx context.Context, c *CharData) error {
 		    level=?, exp=?, map_id=?, pos_x=?, pos_y=?, heading=?,
 		    hp=?, max_hp=?, mp=?, max_mp=?, stamina=?, max_stamina=?,
 		    gold=?, weapon_slot=?, shield_slot=?, helmet_slot=?, armor_slot=?,
-		    hunger=?, thirst=?, last_saved=unixepoch()
+		    hunger=?, thirst=?, bounty=?, active_title=?, last_saved=unixepoch()
 		WHERE id=?`,
 		c.Level, c.Exp, c.MapID, c.PosX, c.PosY, c.Heading,
 		c.HP, c.MaxHP, c.MP, c.MaxMP, c.Stamina, c.MaxStamina,
 		c.Gold, c.WeaponSlot, c.ShieldSlot, c.HelmetSlot, c.ArmorSlot,
-		c.Hunger, c.Thirst, c.ID,
+		c.Hunger, c.Thirst, c.Bounty, c.ActiveTitle, c.ID,
 	)
 	if err != nil {
 		return err
@@ -473,6 +536,27 @@ func (db *DB) SaveChar(ctx context.Context, c *CharData) error {
 	return tx.Commit()
 }
 
+// GetLoginStreak returns the login streak and last reward date (YYYY-MM-DD) for an account.
+func (db *DB) GetLoginStreak(ctx context.Context, accountID int64) (streak int, lastDate string, err error) {
+	err = db.sql.QueryRowContext(ctx,
+		`SELECT streak, last_reward FROM login_streaks WHERE account_id = ?`, accountID,
+	).Scan(&streak, &lastDate)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", nil
+	}
+	return streak, lastDate, err
+}
+
+// SetLoginStreak upserts the login streak for an account.
+func (db *DB) SetLoginStreak(ctx context.Context, accountID int64, streak int, date string) error {
+	_, err := db.sql.ExecContext(ctx,
+		`INSERT INTO login_streaks (account_id, streak, last_reward) VALUES (?,?,?)
+		 ON CONFLICT(account_id) DO UPDATE SET streak=excluded.streak, last_reward=excluded.last_reward`,
+		accountID, streak, date,
+	)
+	return err
+}
+
 // LeaderboardEntry is one row in a leaderboard response.
 type LeaderboardEntry struct {
 	Name  string
@@ -528,6 +612,27 @@ func (db *DB) SaveHotbar(ctx context.Context, charID int64, slots []HotbarSlot) 
 		}
 	}
 	return tx.Commit()
+}
+
+// LoadHotbar returns all saved hotbar slots for a character.
+func (db *DB) LoadHotbar(ctx context.Context, charID int64) ([]HotbarSlot, error) {
+	rows, err := db.sql.QueryContext(ctx,
+		`SELECT slot, item_type, item_id FROM hotbar WHERE character_id=? ORDER BY slot`,
+		charID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HotbarSlot
+	for rows.Next() {
+		var s HotbarSlot
+		if err := rows.Scan(&s.Slot, &s.ItemType, &s.ItemID); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 // LearnAbility persists a newly learned ability for a character.

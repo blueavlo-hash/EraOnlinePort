@@ -1,0 +1,12 @@
+type: leaky
+name: custom/eraonline-invalid-client
+description: "Era Online: repeated invalid client / bad attestation from one IP"
+filter: "evt.Meta.log_type == 'invalid_client'"
+groupby: evt.Meta.source_ip
+capacity: 3
+leakspeed: "60s"
+blackhole: 5m
+labels:
+  service: eraonline
+  type: invalid_client
+  remediation: true

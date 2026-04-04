@@ -95,8 +95,19 @@ type Player struct {
 	AchievementProgress map[string]int
 	VisitedMaps         map[int]bool
 
+	// Gap 20: Titles unlocked by the player.
+	TitleIDs    []int
+	ActiveTitle int // currently displayed title ID (0 = default "Novice")
+
 	// Bounty (gold on this player's head).
 	Bounty int
+
+	// Active title string displayed before character name.
+	ActiveTitle string
+
+	// Login streak (loaded from DB on join, not persisted on Player directly — see handleJoin).
+	LoginStreak    int
+	LastLoginDate  string
 
 	// Faction reputation.
 	Reputation map[string]int
@@ -169,6 +180,13 @@ func (p *Player) FromCharData(cd *db.CharData, connID uint64, instanceID int32, 
 	p.AchievementProgress = make(map[string]int)
 	p.Reputation = make(map[string]int)
 	p.VisitedMaps = make(map[int]bool)
+
+	// Addiction loop fields.
+	p.Bounty = cd.Bounty
+	p.ActiveTitle = cd.ActiveTitle
+	if p.ActiveTitle == "" {
+		p.ActiveTitle = "Novice"
+	}
 }
 
 // ToCharData writes the in-world player state back to a db.CharData for saving.
@@ -208,6 +226,8 @@ func (p *Player) ToCharData() *db.CharData {
 		QuestActive:    p.ActiveQuests,
 		QuestCompleted: p.CompletedQuests,
 		AchievementIDs: p.AchievementIDs,
+		Bounty:         p.Bounty,
+		ActiveTitle:    p.ActiveTitle,
 	}
 }
 
@@ -225,6 +245,7 @@ func (p *Player) BuildSetChar() []byte {
 	w.WriteI16(int16(p.HP))
 	w.WriteI16(int16(p.MaxHP))
 	w.WriteStr(p.CharName)
+	w.WriteStr(p.ActiveTitle)
 	return w.Bytes()
 }
 
@@ -262,7 +283,7 @@ func (p *Player) BuildInventory() []byte {
 		if slot.Equipped {
 			eq = 1
 		}
-		w.WriteU8(uint8(slot.Slot))
+		w.WriteU8(uint8(slot.Slot + 1)) // client expects 1-based slot numbers
 		w.WriteI16(int16(slot.ObjIndex))
 		w.WriteU16(uint16(slot.Amount))
 		w.WriteU8(eq)

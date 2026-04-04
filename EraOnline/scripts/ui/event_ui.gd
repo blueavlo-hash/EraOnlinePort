@@ -62,6 +62,7 @@ var _tourney_active: bool          = false
 var _login_popup:    Panel         = null
 var _login_label:    Label         = null
 var _login_timer:    float         = 0.0
+var _login_tween:    Tween         = null
 
 
 # ---------------------------------------------------------------------------
@@ -354,8 +355,39 @@ func _show_login_popup(streak_day: int, gold: int, msg: String) -> void:
 	else:
 		text = "Welcome back!\nDay %d streak — %dg reward!" % [streak_day, gold]
 	_login_label.text    = text
+
+	# Kill any existing login tween
+	if _login_tween != null:
+		_login_tween.kill()
+
+	# Start offscreen to the right, fully transparent
+	var final_pos := _login_popup.position
+	_login_popup.position = Vector2(final_pos.x + LOGIN_W + 20, final_pos.y)
+	_login_popup.modulate.a = 0.0
 	_login_popup.visible = true
-	_login_timer         = 4.0
+	_login_timer         = 0.0  # tween handles dismiss, not _process timer
+	AudioManager.play_sound(58)  # soft click to acknowledge the reward
+
+	# Slide in from right + fade in
+	_login_tween = create_tween().set_parallel(true)
+	_login_tween.tween_property(_login_popup, "position:x", final_pos.x, 0.45) \
+		.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	_login_tween.tween_property(_login_popup, "modulate:a", 1.0, 0.35) \
+		.set_ease(Tween.EASE_OUT)
+
+	# Hold for 3.5s then slide out + fade out
+	_login_tween.chain().tween_interval(3.5)
+	_login_tween.chain().set_parallel(true)
+	_login_tween.tween_property(_login_popup, "position:x", final_pos.x + LOGIN_W + 20, 0.4) \
+		.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_BACK)
+	_login_tween.tween_property(_login_popup, "modulate:a", 0.0, 0.4) \
+		.set_ease(Tween.EASE_IN)
+
+	_login_tween.chain().tween_callback(_on_login_done)
+
+
+func _on_login_done() -> void:
+	_login_popup.visible = false
 
 
 func _show_tourney_result(results: Array) -> void:

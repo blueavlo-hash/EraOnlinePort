@@ -36,7 +36,7 @@ signal on_equip_change(slot: int, obj_index: int, amount: int)
 signal on_stats(stats: Dictionary)
 signal on_health(hp: int, mp: int, sta: int)
 signal on_damage(char_id: int, damage: int, evaded: bool)
-signal on_chat(char_id: int, chat_type: int, message: String)
+signal on_chat(char_id: int, chat_type: int, message: String, char_name: String)
 signal on_map_change(map_id: int, x: int, y: int)
 signal on_play_sound(sound_num: int)
 signal on_kicked(reason: String)
@@ -826,7 +826,11 @@ func _dispatch_auth(msg_type: int, payload: PackedByteArray) -> void:
 			on_damage.emit(r.read_i32(), r.read_i16(), r.read_u8() != 0)
 
 		NetProtocol.MsgType.S_CHAT:
-			on_chat.emit(r.read_i32(), r.read_u8(), r.read_str())
+			var _ch_id := r.read_i32()
+			var _ch_type := r.read_u8()
+			var _ch_msg := r.read_str()
+			var _ch_name := r.read_str()  # empty string if packet too short (backwards compat)
+			on_chat.emit(_ch_id, _ch_type, _ch_msg, _ch_name)
 
 		NetProtocol.MsgType.S_MAP_CHANGE:
 			on_map_change.emit(r.read_i32(), r.read_i16(), r.read_i16())

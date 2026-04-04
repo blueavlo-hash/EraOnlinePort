@@ -34,6 +34,10 @@ type NPC struct {
 
 	// Wander / patrol.
 	WanderTimer int
+
+	// Addiction loop flags.
+	IsBoss     bool // spawned by boss timer
+	IsEventNPC bool // spawned by world event
 }
 
 // NewNPC creates an NPC instance.

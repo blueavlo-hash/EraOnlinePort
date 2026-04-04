@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/blueavlo-hash/eraonline-server/internal/db"
+	"github.com/blueavlo-hash/eraonline-server/internal/seclog"
 )
 
 // tokenIssuer is the subset of Server used by HTTPServer to issue tokens.
@@ -23,13 +24,22 @@ type HTTPServer struct {
 	world  interface{ PlayerCount() int32 }
 	tokens tokenIssuer
 	log    *slog.Logger
+	sec    *seclog.Logger
 	addr   string
 }
 
 // NewHTTPServer creates the HTTP API server.
 // Pass the game Server as `tokens` so the HTTP token endpoint can issue launcher tokens.
-func NewHTTPServer(addr string, database *db.DB, w interface{ PlayerCount() int32 }, tokens tokenIssuer, log *slog.Logger) *HTTPServer {
-	return &HTTPServer{db: database, world: w, tokens: tokens, log: log, addr: addr}
+func NewHTTPServer(addr string, database *db.DB, w interface{ PlayerCount() int32 }, tokens tokenIssuer, log *slog.Logger, sec *seclog.Logger) *HTTPServer {
+	return &HTTPServer{db: database, world: w, tokens: tokens, log: log, sec: sec, addr: addr}
+}
+
+func remoteIP(r *http.Request) string {
+	// Prefer X-Real-IP (set by proxies), fall back to RemoteAddr.
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+	return seclog.ExtractIP(r.RemoteAddr)
 }
 
 // ListenAndServe starts the HTTP listener. Blocks until ctx is cancelled.
@@ -39,6 +49,7 @@ func (h *HTTPServer) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/register", h.handleRegister)
 	mux.HandleFunc("/api/login", h.handleLogin)
 	mux.HandleFunc("/api/auth/token", h.handleAuthToken)
+	mux.HandleFunc("/", h.handleNotFound)
 
 	srv := &http.Server{
 		Addr:         h.addr,
@@ -84,6 +95,12 @@ func (h *HTTPServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := readJSON(r.Body, &body); err != nil {
+		h.sec.Log("api_invalid_payload",
+			"ip", remoteIP(r),
+			"listen_port", "6970",
+			"result", "deny",
+			"reason", "bad_json",
+		)
 		jsonError(w, "Invalid request body.", http.StatusBadRequest)
 		return
 	}
@@ -103,6 +120,13 @@ func (h *HTTPServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.CreateAccount(ctx, body.Username, body.Password); err != nil {
 		switch err {
 		case db.ErrUsernameTaken:
+			h.sec.Log("auth_fail",
+				"ip", remoteIP(r),
+				"listen_port", "6970",
+				"account", body.Username,
+				"result", "deny",
+				"reason", "username_taken",
+			)
 			jsonError(w, "Username already taken.", http.StatusConflict)
 		default:
 			h.log.Error("register HTTP error", "err", err)
@@ -111,6 +135,13 @@ func (h *HTTPServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.sec.Log("auth_success",
+		"ip", remoteIP(r),
+		"listen_port", "6970",
+		"account", body.Username,
+		"result", "allow",
+		"reason", "registered",
+	)
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, `{"ok":true}`)
 }
@@ -131,6 +162,12 @@ func (h *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := readJSON(r.Body, &body); err != nil {
+		h.sec.Log("api_invalid_payload",
+			"ip", remoteIP(r),
+			"listen_port", "6970",
+			"result", "deny",
+			"reason", "bad_json",
+		)
 		jsonError(w, "Invalid request body.", http.StatusBadRequest)
 		return
 	}
@@ -140,6 +177,17 @@ func (h *HTTPServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	account, err := h.db.VerifyAccount(ctx, body.Username, body.Password)
 	if err != nil {
+		reason := "bad_credentials"
+		if err == db.ErrAccountBanned {
+			reason = "account_banned"
+		}
+		h.sec.Log("api_auth_fail",
+			"ip", remoteIP(r),
+			"listen_port", "6970",
+			"account", body.Username,
+			"result", "deny",
+			"reason", reason,
+		)
 		switch err {
 		case db.ErrInvalidCredentials:
 			jsonError(w, "Invalid credentials.", http.StatusUnauthorized)
@@ -192,6 +240,12 @@ func (h *HTTPServer) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := readJSON(r.Body, &body); err != nil {
+		h.sec.Log("api_invalid_payload",
+			"ip", remoteIP(r),
+			"listen_port", "6970",
+			"result", "deny",
+			"reason", "bad_json",
+		)
 		jsonError(w, "Invalid request body.", http.StatusBadRequest)
 		return
 	}
@@ -201,6 +255,17 @@ func (h *HTTPServer) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 
 	account, err := h.db.VerifyAccount(ctx, body.Username, body.Password)
 	if err != nil {
+		reason := "bad_credentials"
+		if err == db.ErrAccountBanned {
+			reason = "account_banned"
+		}
+		h.sec.Log("api_auth_fail",
+			"ip", remoteIP(r),
+			"listen_port", "6970",
+			"account", body.Username,
+			"result", "deny",
+			"reason", reason,
+		)
 		switch err {
 		case db.ErrInvalidCredentials:
 			jsonError(w, "Invalid credentials.", http.StatusUnauthorized)
@@ -217,6 +282,21 @@ func (h *HTTPServer) handleAuthToken(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"token":%q,"expires_in":300}`, token)
+}
+
+func (h *HTTPServer) handleNotFound(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	h.sec.Log("api_invalid_route",
+		"ip", remoteIP(r),
+		"listen_port", "6970",
+		"result", "deny",
+		"reason", r.URL.Path,
+	)
+	http.Error(w, "not found", http.StatusNotFound)
 }
 
 func setCORS(w http.ResponseWriter) {

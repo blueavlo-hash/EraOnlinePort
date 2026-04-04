@@ -1,6 +1,7 @@
 package world
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -8,46 +9,58 @@ import (
 	"github.com/blueavlo-hash/eraonline-server/internal/proto"
 )
 
-// Skill IDs (1-indexed, matching the original game).
+// Skill IDs (1-indexed, matching the original EO3 game order exactly).
 const (
-	SkillCooking        = 1
-	SkillFishing        = 2
-	SkillLumberjacking  = 3
-	SkillCarpentry      = 4
-	SkillBlacksmithing  = 5
-	SkillMining         = 6
-	SkillHunting        = 7
-	SkillTailoring      = 8
-	SkillAlchemy        = 9
-	SkillMagery         = 10
-	SkillSwordsmanship  = 11
-	SkillAxemanship     = 12
-	SkillBowmanship     = 13
-	SkillShielding      = 14
-	SkillTactics        = 15
-	SkillHiding         = 16
-	SkillSneaking       = 17
-	SkillLockpicking    = 18
-	SkillPoisoning      = 19
-	SkillHealing        = 20
-	SkillAnimalTaming   = 21
-	SkillAnimalLore     = 22
-	SkillMeditation     = 23
-	SkillResistSpells   = 24
-	SkillEvalIntel      = 25
-	SkillSpiritSpeak    = 26
-	SkillCartography    = 27
-	SkillDetectHidden   = 28
+	SkillCooking       = 1
+	SkillMusicianship  = 2
+	SkillTailoring     = 3
+	SkillCarpentry     = 4
+	SkillLumberjacking = 5
+	SkillTactics       = 6
+	SkillDisguise      = 7
+	SkillMerchant      = 8
+	SkillBlacksmithing = 9
+	SkillHiding        = 10
+	SkillMagery        = 11
+	SkillLockpicking   = 12
+	SkillPickpocketing = 13
+	SkillStealth       = 14
+	SkillPoisoning     = 15
+	SkillSwordsmanship = 16
+	SkillParrying      = 17
+	SkillAnimalTaming  = 18
+	SkillReligionLore  = 19
+	SkillFishing       = 20
+	SkillMining        = 21
+	SkillBackstabbing  = 22
+	SkillHealing       = 23
+	SkillSurviving     = 24
+	SkillEtiquette     = 25
+	SkillStreetwise    = 26
+	SkillMeditating    = 27
+	SkillArchery       = 28
 )
 
 // Skill durations in seconds (base, before speed factor).
+// Matches original EO3 GDScript values.
 var skillDurations = map[int]float64{
-	SkillCooking:       6.0,
-	SkillFishing:       12.0,
-	SkillLumberjacking: 10.0,
-	SkillCarpentry:     6.0,
-	SkillBlacksmithing: 8.0,
-	SkillMining:        8.0,
+	SkillCooking:       8.0,  // Gap 5: 8s
+	SkillCarpentry:     6.0,  // Gap 5: 6s
+	SkillLumberjacking: 10.0, // Gap 5: 10s
+	SkillBlacksmithing: 7.0,  // Gap 5: 7s
+	SkillFishing:       12.0, // Gap 5: 12s
+	SkillMining:        7.0,  // Gap 5: 7s
+}
+
+// skillXPGains maps skill ID to XP awarded per successful action.
+// Matches original EO3 values (Gap 4).
+var skillXPGains = map[int]int{
+	SkillCooking:       12,
+	SkillCarpentry:     10,
+	SkillLumberjacking: 10,
+	SkillBlacksmithing: 25,
+	SkillFishing:       8,
+	SkillMining:        15,
 }
 
 // skillXPToNext returns XP needed to raise a skill from level to level+1.
@@ -106,11 +119,11 @@ func (w *World) handleUseSkill(p *Player, payload []byte) {
 	case SkillCooking:
 		w.startCooking(p)
 	case SkillFishing:
-		w.startGathering(p, SkillFishing, "fish", 0)
+		w.startGathering(p, SkillFishing, "fish", 16)
 	case SkillLumberjacking:
-		w.startGathering(p, SkillLumberjacking, "log", 0)
+		w.startGathering(p, SkillLumberjacking, "log", 17)
 	case SkillMining:
-		w.startGathering(p, SkillMining, "mine", 0)
+		w.startGathering(p, SkillMining, "mine", 48)
 	case SkillBlacksmithing, SkillCarpentry:
 		w.startCrafting(p, int(skillID))
 	default:
@@ -153,7 +166,37 @@ func (w *World) startCooking(p *Player) {
 	w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You begin cooking..."))
 }
 
-func (w *World) startGathering(p *Player, skillID int, action string, toolType int) {
+func (w *World) startGathering(p *Player, skillID int, action string, toolItemType int) {
+	// Gap 22: verify tool is in inventory when required.
+	if toolItemType > 0 {
+		hasTool := false
+		for _, slot := range p.Inventory {
+			if slot == nil || slot.ObjIndex == 0 {
+				continue
+			}
+			obj := w.gameData.GetObject(slot.ObjIndex)
+			if obj != nil && obj.ObjType == toolItemType {
+				hasTool = true
+				break
+			}
+		}
+		if !hasTool {
+			var toolMsg string
+			switch skillID {
+			case SkillFishing:
+				toolMsg = "You need a fishing rod to fish."
+			case SkillLumberjacking:
+				toolMsg = "You need an axe to chop wood."
+			case SkillMining:
+				toolMsg = "You need a pickaxe to mine."
+			default:
+				toolMsg = "You need the required tool."
+			}
+			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(toolMsg))
+			return
+		}
+	}
+
 	skillLevel := p.getSkillLevel(skillID)
 	baseDur, ok := skillDurations[skillID]
 	if !ok {
@@ -223,10 +266,11 @@ func (w *World) tickSkillActions() {
 		wr.WriteU16(0)
 		w.sendTo(p, proto.MsgSSkillProgress, wr.Bytes())
 
-		// Check success.
+		// Check success. Award 1 XP even on failure so progress is always visible.
 		skillLevel := p.getSkillLevel(ta.SkillID)
 		if randSource.Float64() > skillSuccessChance(skillLevel) {
 			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You failed."))
+			w.awardSkillXP(p, ta.SkillID, 1)
 			continue
 		}
 
@@ -240,35 +284,64 @@ func (w *World) completeSkillAction(p *Player, ta *TimedAction) {
 	case "cook":
 		if ta.AuxSlot >= 0 && ta.AuxSlot < 20 && p.Inventory[ta.AuxSlot] != nil {
 			raw := p.Inventory[ta.AuxSlot]
-			// Replace raw food with cooked version (cooked obj_index = raw + 1, by convention).
-			cookedIdx := raw.ObjIndex + 1
-			raw.ObjIndex = cookedIdx
+			rawIdx := raw.ObjIndex
+			// Consume one raw item.
+			raw.Amount--
+			if raw.Amount <= 0 {
+				p.Inventory[ta.AuxSlot] = nil
+			}
+			// Meat (117) → Roasted Meat (156); everything else → Roasted Fish (307).
+			cookedIdx := 307
+			if rawIdx == 117 {
+				cookedIdx = 156
+			}
+			w.giveItem(p, cookedIdx, 1)
 			w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
-			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You cooked the food."))
+			obj := w.gameData.GetObject(cookedIdx)
+			name := "food"
+			if obj != nil {
+				name = obj.Name
+			}
+			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You cook the food into "+name+"."))
 		}
 	case "fish":
-		// Award random fish (obj_index 50-55 are fish, by convention).
-		fishIdx := 50 + randN(6)
-		if w.giveItem(p, fishIdx, 1) {
+		// 15% chance of small catch (item 135), otherwise random fish 308-317.
+		fishIdx := 135
+		catchSize := 1
+		if randSource.Float64() >= 0.15 {
+			fishIdx = 308 + randN(10) // items 308-317
+			catchSize = 1 + randN(5)  // larger fish for tournament scoring
+		}
+		if w.giveItem(p, fishIdx, catchSize) {
 			w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
-			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You caught a fish!"))
+			obj := w.gameData.GetObject(fishIdx)
+			name := "a fish"
+			if obj != nil {
+				name = obj.Name
+			}
+			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You caught "+name+"!"))
+			w.checkAchievements(p, "fish_caught", 1)
+			// Tournament tracking.
+			w.recordTourneyCatch(p, catchSize)
 		}
 	case "log":
-		logIdx := 10 // logs object index
+		// Gap 25: log = item 114 (Log, obj_type 20).
+		logIdx := 114
 		if w.giveItem(p, logIdx, 1+randN(3)) {
 			w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
 			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You cut some logs."))
 		}
 	case "mine":
-		oreIdx := 30 // ore object index
+		// Gap 25: ore = item 154 (ore, obj_type 32).
+		oreIdx := 154
 		if w.giveItem(p, oreIdx, 1+randN(2)) {
 			w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
 			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You mined some ore."))
 		}
 	case "smelt":
-		// 2 ore → 4 steel
-		oreIdx := 30
-		steelIdx := 31
+		// Gap 25: ore = 154, steel = 153. 2 ore → 4 steel.
+		oreIdx := 154
+		steelIdx := 153
 		oreCount := 0
 		for _, slot := range p.Inventory {
 			if slot != nil && slot.ObjIndex == oreIdx {
@@ -283,8 +356,9 @@ func (w *World) completeSkillAction(p *Player, ta *TimedAction) {
 			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You smelted the ore into steel bars."))
 		}
 	case "planks":
-		logIdx := 10
-		plankIdx := 11
+		// Gap 25: log = 114, plank = 148. 1 log → 2 planks.
+		logIdx := 114
+		plankIdx := 148
 		w.removeItemFromInventory(p, logIdx, 1)
 		w.giveItem(p, plankIdx, 2)
 		w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
@@ -303,12 +377,14 @@ func (w *World) completeSkillAction(p *Player, ta *TimedAction) {
 		w.onCraftItem(p, "smelt")
 	case "planks":
 		w.onCraftItem(p, "planks")
-	case "fish":
-		w.checkAchievements(p, "fish", 1)
 	}
 
-	// Award skill XP.
-	w.awardSkillXP(p, ta.SkillID, 1)
+	// Award skill XP — use per-skill XP gain if defined, otherwise 1 (Gap 4).
+	xpGain := 1
+	if g, ok := skillXPGains[ta.SkillID]; ok {
+		xpGain = g
+	}
+	w.awardSkillXP(p, ta.SkillID, xpGain)
 }
 
 // awardSkillXP adds XP to a skill and handles level-up.
@@ -331,6 +407,9 @@ func (w *World) awardSkillXP(p *Player, skillID, xpGain int) {
 	wr.WriteI32(int32(xpNeeded))
 	w.sendTo(p, proto.MsgSSkillXP, wr.Bytes())
 
+	w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(
+		fmt.Sprintf("%s +%d XP (%d/%d)", skillName(skillID), xpGain, sk.XP, xpNeeded)))
+
 	if sk.XP >= xpNeeded {
 		sk.XP -= xpNeeded
 		sk.Level++
@@ -339,7 +418,7 @@ func (w *World) awardSkillXP(p *Player, skillID, xpGain int) {
 		wr2.WriteU8(uint8(skillID))
 		wr2.WriteI16(int16(sk.Level))
 		w.sendTo(p, proto.MsgSSkillRaise, wr2.Bytes())
-		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("Your "+skillName(skillID)+" skill has increased!"))
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(fmt.Sprintf("Your %s skill has increased to %d!", skillName(skillID), sk.Level)))
 	}
 }
 
@@ -353,14 +432,34 @@ func (p *Player) getSkillLevel(skillID int) int {
 
 func skillName(id int) string {
 	names := map[int]string{
-		1: "Cooking", 2: "Fishing", 3: "Lumberjacking", 4: "Carpentry",
-		5: "Blacksmithing", 6: "Mining", 7: "Hunting", 8: "Tailoring",
-		9: "Alchemy", 10: "Magery", 11: "Swordsmanship", 12: "Axemanship",
-		13: "Bowmanship", 14: "Shielding", 15: "Tactics", 16: "Hiding",
-		17: "Sneaking", 18: "Lockpicking", 19: "Poisoning", 20: "Healing",
-		21: "Animal Taming", 22: "Animal Lore", 23: "Meditation",
-		24: "Resist Spells", 25: "Eval Intelligence", 26: "Spirit Speak",
-		27: "Cartography", 28: "Detect Hidden",
+		1:  "Cooking",
+		2:  "Musicianship",
+		3:  "Tailoring",
+		4:  "Carpenting",
+		5:  "Lumberjacking",
+		6:  "Tactics",
+		7:  "Disguise",
+		8:  "Merchant",
+		9:  "Blacksmithing",
+		10: "Hiding",
+		11: "Magery",
+		12: "Lockpicking",
+		13: "Pickpocketing",
+		14: "Stealth",
+		15: "Poisoning",
+		16: "Swordsmanship",
+		17: "Parrying",
+		18: "Animal Taming",
+		19: "Religion Lore",
+		20: "Fishing",
+		21: "Mining",
+		22: "Backstabbing",
+		23: "Healing",
+		24: "Surviving",
+		25: "Etiquette",
+		26: "Streetwise",
+		27: "Meditating",
+		28: "Archery",
 	}
 	if n, ok := names[id]; ok {
 		return n

@@ -11,6 +11,7 @@ import (
 
 	"github.com/blueavlo-hash/eraonline-server/internal/db"
 	"github.com/blueavlo-hash/eraonline-server/internal/proto"
+	"github.com/blueavlo-hash/eraonline-server/internal/seclog"
 	"github.com/blueavlo-hash/eraonline-server/internal/session"
 	"github.com/blueavlo-hash/eraonline-server/internal/world"
 )
@@ -39,16 +40,37 @@ func newConn(id uint64, raw net.Conn, srv *Server) *Conn {
 	}
 }
 
+// remoteIP returns just the IP address of the remote end.
+func (c *Conn) remoteIP() string {
+	return seclog.ExtractIP(c.raw.RemoteAddr().String())
+}
+
+// listenPort returns the local port this connection arrived on.
+func (c *Conn) listenPort() string {
+	return seclog.ExtractPort(c.raw.LocalAddr().String())
+}
+
+// connID returns the connection ID formatted as 8-char hex.
+func (c *Conn) connID() string {
+	return fmt.Sprintf("%08x", c.id)
+}
+
 // Run is the main connection goroutine: handshake → auth → read loop.
 // The send pump runs concurrently.
 func (c *Conn) Run(ctx context.Context) {
 	defer func() {
-		// Always clean up.
+		// Log close for authenticated sessions.
+		if c.sess.Username != "" {
+			c.srv.sec.Log("conn_close",
+				"ip", c.remoteIP(),
+				"listen_port", c.listenPort(),
+				"conn_id", c.connID(),
+				"account", c.sess.Username,
+			)
+		}
 		close(c.done)
 		c.raw.Close()
 		c.srv.removeConn(c.id)
-
-		// Notify world of departure (if in-world).
 		if c.sess.GetState() == session.StateInWorld {
 			c.srv.world.Inbox <- world.ClientMsg{ConnID: c.id, LeaveConn: true}
 		}
@@ -61,6 +83,19 @@ func (c *Conn) Run(ctx context.Context) {
 	if err := c.doHandshake(); err != nil {
 		if !isEOF(err) {
 			c.log.Debug("handshake failed", "err", err)
+			reason := "parse_error"
+			event := "handshake_fail"
+			if strings.Contains(err.Error(), "too large") {
+				event = "oversized_packet"
+				reason = "oversized_preauth"
+			}
+			c.srv.sec.Log(event,
+				"ip", c.remoteIP(),
+				"listen_port", c.listenPort(),
+				"conn_id", c.connID(),
+				"result", "drop",
+				"reason", reason,
+			)
 		}
 		return
 	}
@@ -139,13 +174,25 @@ func (c *Conn) doHandshake() error {
 
 	// Verify client attestation.
 	if !proto.VerifyClientProof(c.srv.clientIdentitySecret, clientChallenge, serverNonce, clientProof) {
-		// Send a generic kick — don't reveal what failed.
+		c.srv.sec.Log("invalid_client",
+			"ip", c.remoteIP(),
+			"listen_port", c.listenPort(),
+			"conn_id", c.connID(),
+			"result", "deny",
+			"reason", "bad_attestation",
+		)
 		_ = c.writeRaw(proto.FramePreauth(proto.MsgAuthFail, buildStrPayload("Connection refused.")))
 		return fmt.Errorf("client attestation failed (unrecognized client)")
 	}
 
 	c.sess.ClientNonce = clientNonce
 	c.sess.SetState(session.StateAuth)
+	c.srv.sec.Log("conn_open",
+		"ip", c.remoteIP(),
+		"listen_port", c.listenPort(),
+		"conn_id", c.connID(),
+		"result", "allow",
+	)
 	c.log.Debug("handshake complete")
 	return nil
 }
@@ -168,6 +215,15 @@ func (c *Conn) doAuth(ctx context.Context) error {
 		case proto.MsgAuthToken:
 			return c.handleAuthToken(ctx, payload)
 		default:
+			c.srv.sec.Log("protocol_error",
+				"ip", c.remoteIP(),
+				"listen_port", c.listenPort(),
+				"conn_id", c.connID(),
+				"result", "drop",
+				"reason", "unexpected_opcode",
+				"opcode", fmt.Sprintf("0x%04X", msgType),
+				"state", "auth",
+			)
 			return fmt.Errorf("expected AUTH_LOGIN/REGISTER/TOKEN, got 0x%04X", msgType)
 		}
 	}
@@ -191,6 +247,13 @@ func (c *Conn) handleAuthLogin(ctx context.Context, payload []byte) error {
 		return c.sendAuthFail("Invalid username.")
 	}
 
+	c.srv.sec.Log("auth_attempt",
+		"ip", c.remoteIP(),
+		"listen_port", c.listenPort(),
+		"conn_id", c.connID(),
+		"account", username,
+	)
+
 	account, err := c.srv.db.VerifyAccount(ctx, username, password)
 	if err != nil {
 		c.sess.FailedAttempts++
@@ -198,6 +261,28 @@ func (c *Conn) handleAuthLogin(ctx context.Context, payload []byte) error {
 			c.sess.LockedUntil = time.Now().Add(proto.AuthLockoutSeconds * time.Second)
 		}
 		c.log.Info("auth failed", "username", username, "attempts", c.sess.FailedAttempts)
+		reason := "bad_password"
+		if err == db.ErrAccountBanned {
+			reason = "account_banned"
+		}
+		c.srv.sec.Log("auth_fail",
+			"ip", c.remoteIP(),
+			"listen_port", c.listenPort(),
+			"conn_id", c.connID(),
+			"account", username,
+			"result", "deny",
+			"reason", reason,
+			"attempts", c.sess.FailedAttempts,
+		)
+		if c.sess.FailedAttempts >= proto.AuthMaxAttempts {
+			c.srv.sec.Log("account_lockout",
+				"ip", c.remoteIP(),
+				"listen_port", c.listenPort(),
+				"conn_id", c.connID(),
+				"account", username,
+				"attempts", c.sess.FailedAttempts,
+			)
+		}
 		switch err {
 		case db.ErrAccountBanned:
 			return c.sendAuthFail("Account is banned.")
@@ -291,6 +376,13 @@ func (c *Conn) completeAuth(account *db.Account) error {
 
 	c.sess.SetState(session.StateCharSelect)
 	c.log.Info("authenticated", "username", account.Username)
+	c.srv.sec.Log("auth_success",
+		"ip", c.remoteIP(),
+		"listen_port", c.listenPort(),
+		"conn_id", c.connID(),
+		"account", account.Username,
+		"result", "allow",
+	)
 
 	// Send AUTH_OK.
 	w := proto.NewWriter(32)
@@ -459,6 +551,24 @@ func (c *Conn) readLoop(ctx context.Context) {
 		if err != nil {
 			if !isEOF(err) {
 				c.log.Debug("read error", "err", err)
+				errStr := err.Error()
+				event, reason := "protocol_error", "read_error"
+				switch {
+				case strings.Contains(errStr, "sequence mismatch"):
+					event, reason = "state_violation", "sequence_mismatch"
+				case strings.Contains(errStr, "too large"):
+					event, reason = "oversized_packet", "oversized_auth"
+				case strings.Contains(errStr, "HMAC verification"):
+					reason = "hmac_fail"
+				}
+				c.srv.sec.Log(event,
+					"ip", c.remoteIP(),
+					"listen_port", c.listenPort(),
+					"conn_id", c.connID(),
+					"account", c.sess.Username,
+					"result", "drop",
+					"reason", reason,
+				)
 			}
 			return
 		}
@@ -468,6 +578,13 @@ func (c *Conn) readLoop(ctx context.Context) {
 		// Rate limit check.
 		if !c.sess.RateLimiter.Allow(msgType) {
 			c.log.Warn("rate limit exceeded", "msg_type", fmt.Sprintf("0x%04X", msgType))
+			c.srv.sec.Log("rate_limit_hit",
+				"ip", c.remoteIP(),
+				"listen_port", c.listenPort(),
+				"conn_id", c.connID(),
+				"account", c.sess.Username,
+				"opcode", fmt.Sprintf("0x%04X", msgType),
+			)
 			continue
 		}
 

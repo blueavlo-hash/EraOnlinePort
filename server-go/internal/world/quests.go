@@ -516,7 +516,7 @@ func (w *World) handleQuestTurnin(p *Player, payload []byte) {
 		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(qd.CompletionMsg))
 	}
 
-	w.checkAchievements(p, "quest", 1)
+	w.checkAchievements(p, "quests_completed", 1)
 	w.checkLevelUp(p)
 	w.sendQuestIndicators(p)
 }
@@ -649,7 +649,7 @@ func (w *World) onKillNPC(p *Player, npcName string) {
 			}
 		}
 	}
-	w.checkAchievements(p, "kill", 1)
+	w.checkAchievements(p, "kills_monsters", 1)
 }
 
 // onCraftItem updates quest progress for craft objectives matching the given action string.
@@ -674,7 +674,7 @@ func (w *World) onCraftItem(p *Player, action string) {
 			}
 		}
 	}
-	w.checkAchievements(p, "craft", 1)
+	w.checkAchievements(p, "items_crafted", 1)
 }
 
 // onCookItem updates quest progress for cook objectives.
@@ -698,7 +698,7 @@ func (w *World) onCookItem(p *Player) {
 			}
 		}
 	}
-	w.checkAchievements(p, "craft", 1)
+	w.checkAchievements(p, "items_crafted", 1)
 }
 
 // onExploreMap updates quest progress for explore objectives.

@@ -23,14 +23,33 @@ type statBlock struct {
 }
 
 var classStats = map[int]statBlock{
-	ClassWarrior:  {120, 30, 80, 12, 8, 5, 10},
-	ClassMage:     {70, 120, 60, 5, 7, 14, 5},
-	ClassRogue:    {90, 40, 90, 10, 12, 6, 7},
-	ClassArcher:   {95, 40, 85, 9, 11, 7, 8},
+	// Original EO3 base stats (level 1).
+	ClassWarrior:  {150, 30, 150, 18, 10, 8, 10},
+	ClassMage:     {80, 120, 100, 8, 10, 18, 5},
+	ClassRogue:    {100, 60, 120, 14, 18, 10, 7},
+	ClassArcher:   {100, 80, 110, 12, 16, 12, 8},
 	ClassBard:     {85, 80, 70, 7, 9, 11, 6},
 	ClassDruid:    {95, 90, 75, 8, 8, 12, 8},
 	ClassPaladin:  {110, 60, 75, 11, 7, 8, 11},
 	ClassAssassin: {85, 50, 85, 10, 13, 6, 7},
+}
+
+// levelGain holds the fixed stat gains per level-up per class.
+type levelGain struct {
+	hp, mp, sta int
+	// primary stat gain: str for Warrior, int_ for Mage, agi for Rogue/Archer.
+	primaryStat int // which stat: 1=str, 2=agi, 3=int_
+}
+
+var classLevelGains = map[int]levelGain{
+	ClassWarrior:  {15, 0, 12, 1},  // +1 STR
+	ClassMage:     {5, 8, 7, 3},    // +1 INT
+	ClassRogue:    {8, 4, 10, 2},   // +1 AGI
+	ClassArcher:   {8, 6, 8, 2},    // +1 AGI
+	ClassBard:     {6, 5, 7, 3},
+	ClassDruid:    {7, 6, 7, 3},
+	ClassPaladin:  {10, 3, 9, 1},
+	ClassAssassin: {7, 4, 9, 2},
 }
 
 // baseStats returns the stat block for a class (defaults to Warrior).
@@ -95,18 +114,40 @@ func xpToNextLevel(level int) int {
 	return int(1500.0 * math.Pow(1.35, float64(level-1)))
 }
 
-// recalcCombatStats recomputes a player's derived combat stats.
+// recalcCombatStats recomputes a player's derived combat stats using fixed
+// per-level gains matching the original EO3 VB6 server.
 // Returns (maxHP, maxMP, maxSTA, minDmg, maxDmg, defense, agi, str_).
 func recalcCombatStats(classID, level, weaponMinHit, weaponMaxHit, weaponDef, shieldDef, armorDef int) (maxHP, maxMP, maxSTA, minDmg, maxDmg, defense, agi, str_ int) {
 	s := baseStats(classID)
-	maxHP = s.hp + (level-1)*s.con*2
-	maxMP = s.mp + (level-1)*s.int_*2
-	maxSTA = s.sta + (level-1)*2
-	minDmg = s.str_ + weaponMinHit + (level-1)/3
-	maxDmg = s.str_ + weaponMaxHit + (level-1)/3
-	defense = weaponDef + shieldDef + armorDef + (level-1)/4
-	agi = s.agi
-	str_ = s.str_
+	gains, ok := classLevelGains[classID]
+	if !ok {
+		gains = classLevelGains[ClassWarrior] // default fallback
+	}
+	if level < 1 {
+		level = 1
+	}
+	levelsGained := level - 1
+	maxHP = s.hp + levelsGained*gains.hp
+	maxMP = s.mp + levelsGained*gains.mp
+	maxSTA = s.sta + levelsGained*gains.sta
+
+	// Primary stat accumulates +1 per level.
+	str_  = s.str_
+	agi   = s.agi
+	int_  := s.int_
+	switch gains.primaryStat {
+	case 1:
+		str_ += levelsGained
+	case 2:
+		agi += levelsGained
+	case 3:
+		int_ += levelsGained
+	}
+
+	minDmg = str_ + weaponMinHit + levelsGained/3
+	maxDmg = str_ + weaponMaxHit + levelsGained/3
+	defense = weaponDef + shieldDef + armorDef + levelsGained/4
+	_ = int_ // available for future spell-damage scaling
 	return
 }
 

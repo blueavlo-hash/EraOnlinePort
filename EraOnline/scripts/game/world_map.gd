@@ -84,6 +84,8 @@ var _quest_ui: QuestUI = null
 var _quest_dialog_ui: QuestDialogUI = null
 ## Respawn destination held while death screen is showing; applied on player confirm.
 var _pending_respawn: Dictionary = {}
+## SetChar packets buffered while the death screen is blocking _load_map_at.
+var _pending_set_chars: Array = []
 var _level_up_ui: Node = null
 
 ## Day/night lighting
@@ -1694,8 +1696,9 @@ func _draw() -> void:
 			continue
 		var col: Color = f["color"]
 		col.a = f["alpha"]
+		var fsz: int = f.get("font_size", 14)
 		draw_string(ThemeDB.fallback_font, Vector2(f["wx"], f["wy"]), f["text"],
-				HORIZONTAL_ALIGNMENT_CENTER, -1, 14, col)
+				HORIZONTAL_ALIGNMENT_CENTER, -1, fsz, col)
 
 	# --- AOE aim mode cursor ---
 	if _aoe_aim_spell > 0:
@@ -1961,6 +1964,17 @@ func _draw() -> void:
 		var p3_nx: int = p3x + 16 - int(p3_nw * 0.5)
 		draw_string(p3_font, Vector2(float(p3_nx) - 1.0, float(p3_ly) + 1.0), p3c.char_name, HORIZONTAL_ALIGNMENT_LEFT, -1, p3_font_sz, Color(0.0, 0.0, 0.0, 0.75))
 		draw_string(p3_font, Vector2(float(p3_nx), float(p3_ly)), p3c.char_name, HORIZONTAL_ALIGNMENT_LEFT, -1, p3_font_sz, p3_col)
+		# Draw "WANTED" indicator above other players with bounties
+		if not p3_is_npc and p3_idx != _player_idx and _bounty_ui != null and _bounty_ui.is_wanted(p3_idx):
+			var p3_w_txt := "WANTED"
+			var p3_w_col := Color(1.0, 0.15, 0.10, 0.95)
+			var p3_w_sz: int = 9
+			var p3_w_font: Font = ThemeDB.fallback_font
+			var p3_w_width: float = p3_w_font.get_string_size(p3_w_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, p3_w_sz).x
+			var p3_w_x: int = p3x + 16 - int(p3_w_width * 0.5)
+			var p3_w_y: int = p3_ly - p3_font_sz - 2
+			draw_string(p3_w_font, Vector2(float(p3_w_x) - 1.0, float(p3_w_y) + 1.0), p3_w_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, p3_w_sz, Color(0.0, 0.0, 0.0, 0.7))
+			draw_string(p3_w_font, Vector2(float(p3_w_x), float(p3_w_y)), p3_w_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, p3_w_sz, p3_w_col)
 		# Draw quest indicator (! or ?) above nameplate for NPCs with quests
 		if p3_is_npc and _quest_indicators.has(p3_idx):
 			var p3_ind: String = _quest_indicators[p3_idx]
@@ -2241,8 +2255,10 @@ func _on_net_world_state(map_id: int, x: int, y: int) -> void:
 	# If the death screen is visible, hold respawn data until player clicks Respawn.
 	if _death_screen != null and _death_screen.is_open():
 		_pending_respawn = {"map_id": map_id, "x": x, "y": y}
+		_pending_set_chars.clear()  # discard any stale chars from a previous warp
 		_death_screen.on_respawn_data_ready()
 		return
+	_pending_set_chars.clear()
 	_load_map_at(map_id, Vector2i(x, y))
 
 
@@ -2268,8 +2284,11 @@ func _on_net_set_char(char_id: int, body: int, head: int, weapon: int, shield: i
 			if armor_eq == 0 and helmet_eq == 0:
 				p.base_body_idx = body
 			_build_anims(p)
+	elif _death_screen != null and _death_screen.is_open():
+		# Death screen is blocking the map load — buffer this char for replay after respawn.
+		_pending_set_chars.append([char_id, body, head, weapon, shield, x, y, heading, hp, max_hp, _char_name])
 	else:
-		# Another player entering our visible area.
+		# Another player/NPC entering our visible area.
 		set_char(char_id, body, head, weapon, shield, Vector2i(x, y), heading, _char_name, hp, max_hp)
 
 
@@ -2315,10 +2334,9 @@ func _on_rain_changed(is_raining: bool) -> void:
 
 
 ## Chat message received — forwarded to ChatUI; keep console fallback.
-func _on_net_chat(char_id: int, chat_type: int, message: String) -> void:
-	print("[CHAT type=%d char=%d] %s" % [chat_type, char_id, message])
+func _on_net_chat(char_id: int, chat_type: int, message: String, char_name: String = "") -> void:
+	print("[CHAT type=%d char=%d name=%s] %s" % [chat_type, char_id, char_name, message])
 	# ChatUI connects to Network.on_chat directly, so no explicit forward needed.
-	# The print is kept for debugging; ChatUI handles display independently.
 
 
 ## Server kicked us.
@@ -2340,6 +2358,11 @@ func _on_death_respawn_confirmed() -> void:
 		_load_map_at(_pending_respawn["map_id"],
 				Vector2i(_pending_respawn["x"], _pending_respawn["y"]))
 		_pending_respawn = {}
+	# Replay any SetChar packets that arrived while the death screen was blocking.
+	for args in _pending_set_chars:
+		set_char(args[0], args[1], args[2], args[3], args[4],
+				Vector2i(args[5], args[6]), args[7], args[10], args[8], args[9])
+	_pending_set_chars.clear()
 
 
 ## XP gained — spawn a green floater at the player's position.
@@ -2961,9 +2984,7 @@ func _get_title_prefix(name: String) -> String:
 
 
 func _on_net_rare_drop(item_name: String, rarity: int, x: int, y: int) -> void:
-	## Server notified us of a rare item drop — show colored chat notification.
-	if _chat_ui == null:
-		return
+	## Server notified us of a rare item drop — show colored chat + floating world text.
 	var rarity_colors: Array = [
 		Color.WHITE,
 		Color(0.12, 0.85, 0.12),   # Uncommon — green
@@ -2972,8 +2993,28 @@ func _on_net_rare_drop(item_name: String, rarity: int, x: int, y: int) -> void:
 	]
 	var rarity_labels: Array = ["", "[Uncommon]", "[Rare]", "[LEGENDARY]"]
 	var r: int = clampi(rarity, 0, 3)
-	var msg: String = "%s %s dropped at (%d, %d)!" % [rarity_labels[r], item_name, x, y]
-	_chat_ui.add_message(msg, rarity_colors[r])
+	var col: Color = rarity_colors[r]
+	var msg: String = "%s %s" % [rarity_labels[r], item_name]
+	# Chat notification
+	if _chat_ui != null and _chat_ui.has_method("add_message_colored"):
+		_chat_ui.add_message_colored(msg + " dropped!", col)
+	# Floating world text at the drop position
+	_spawn_rare_floater(x, y, msg, col, 10 + r * 4)
+
+
+func _spawn_rare_floater(tile_x: int, tile_y: int, text: String, col: Color, font_size: int = 14) -> void:
+	## Spawns a floating text at a world tile position (for rare drops, events, etc.)
+	var wx: float = float(tile_x * TILE + TILE / 2)
+	var wy: float = float(tile_y * TILE - 8)
+	_world_floaters.append({
+		"text":  text,
+		"wx":    wx,
+		"wy":    wy,
+		"alpha": 1.0,
+		"color": col,
+		"timer": 2.5,
+		"font_size": font_size,
+	})
 
 
 func _on_enchant_requested(slot: int, item_name: String, enchant_level: int) -> void:

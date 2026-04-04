@@ -23,6 +23,7 @@ import (
 	"github.com/blueavlo-hash/eraonline-server/internal/config"
 	"github.com/blueavlo-hash/eraonline-server/internal/db"
 	"github.com/blueavlo-hash/eraonline-server/internal/proto"
+	"github.com/blueavlo-hash/eraonline-server/internal/seclog"
 	"github.com/blueavlo-hash/eraonline-server/internal/session"
 	"github.com/blueavlo-hash/eraonline-server/internal/world"
 )
@@ -40,6 +41,7 @@ type Server struct {
 	db     *db.DB
 	world  *world.World
 	log    *slog.Logger
+	sec    *seclog.Logger
 
 	// serverSecret is the HMAC secret used for session key derivation (from config).
 	serverSecret []byte
@@ -58,7 +60,7 @@ type Server struct {
 }
 
 // New creates a Server.
-func New(cfg *config.Config, database *db.DB, w *world.World, log *slog.Logger) (*Server, error) {
+func New(cfg *config.Config, database *db.DB, w *world.World, log *slog.Logger, sec *seclog.Logger) (*Server, error) {
 	tlsCfg, err := buildTLS(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("server: TLS setup: %w", err)
@@ -69,6 +71,7 @@ func New(cfg *config.Config, database *db.DB, w *world.World, log *slog.Logger) 
 		db:                   database,
 		world:                w,
 		log:                  log,
+		sec:                  sec,
 		serverSecret:         []byte(cfg.Server.Secret),
 		clientIdentitySecret: []byte(cfg.Server.ClientIdentitySecret),
 		tlsCfg:               tlsCfg,

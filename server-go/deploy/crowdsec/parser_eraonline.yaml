@@ -1,0 +1,35 @@
+onsuccess: next_stage
+filter: "evt.Parsed.program == 'eraonline-seclog'"
+name: custom/eraonline-seclog
+description: "Parse Era Online game server security events (logfmt)"
+nodes:
+  - grok:
+      pattern: 'ts=%{TIMESTAMP_ISO8601:ts} event=%{WORD:event_type} ip=%{IP:source_ip} %{GREEDYDATA:rest}'
+      apply_on: message
+    statics:
+      - meta: service
+        value: eraonline
+      - meta: source_ip
+        expression: evt.Parsed.source_ip
+      - meta: log_type
+        expression: evt.Parsed.event_type
+      - target: evt.StrTime
+        expression: evt.Parsed.ts
+  - grok:
+      pattern: 'reason=%{WORD:reason}'
+      apply_on: message
+    statics:
+      - meta: reason
+        expression: evt.Parsed.reason
+  - grok:
+      pattern: 'account=%{WORD:account}'
+      apply_on: message
+    statics:
+      - meta: username
+        expression: evt.Parsed.account
+  - grok:
+      pattern: 'listen_port=%{NUMBER:listen_port}'
+      apply_on: message
+    statics:
+      - meta: listen_port
+        expression: evt.Parsed.listen_port

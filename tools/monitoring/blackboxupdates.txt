@@ -1,0 +1,105 @@
+Update my existing Grafana Blackbox Exporter dashboard.
+
+Keep the current panels intact, but add NEW sections organized as collapsed rows. Each row should contain panels using the existing Prometheus Blackbox metrics (probe_success, probe_duration_seconds, etc.).
+
+Use stat panels for up/down and time series panels for latency.
+
+Create the following collapsed sections:
+
+ROW TITLE: "VPN Integrity"
+
+Purpose: Verify VPN routing and detect leaks.
+
+Add panels for:
+
+https://api.ipify.org
+https://ifconfig.me
+https://cloudflare.com/cdn-cgi/trace
+
+Panels:
+
+Stat panel: probe_success (label by target)
+Stat panel: probe_duration_seconds
+(Optional) Extract and display returned IP if available
+ROW TITLE: "Policy Enforcement (Expected Failures)"
+
+Purpose: Ensure blocked services remain blocked.
+
+Targets:
+
+https://graph.facebook.com
+https://dns.google
+https://cloudflare-dns.com
+
+Panels:
+
+Stat panel showing probe_success (expected = 0)
+Use red for success=1 (this indicates failure of policy)
+Time series panel for attempts over time
+ROW TITLE: "Network Stability"
+
+Purpose: Detect jitter, latency spikes, and degradation.
+
+Targets:
+
+1.1.1.1 (ICMP or TCP)
+cloudflare.com
+a Discord endpoint (example: discord.com)
+
+Panels:
+
+Time series: probe_duration_seconds
+Stat panel: probe_success
+Optional: rolling average latency
+ROW TITLE: "DNS Integrity"
+
+Purpose: Validate DNS behavior and filtering.
+
+Targets:
+
+google.com
+nonexistentdomain.test (should return failure)
+a blocked domain (if applicable)
+
+Panels:
+
+Stat panel: probe_success
+Time series: probe_duration_seconds
+Optional: DNS lookup time if available
+ROW TITLE: "External Reality (Canary Checks)"
+
+Purpose: Detect full internet outages or major issues.
+
+Targets:
+
+https://cloudflare.com
+https://google.com
+https://amazon.com
+
+Panels:
+
+Stat panel: probe_success
+Time series: latency comparison
+ROW TITLE: "Advanced Routing / Path Validation"
+
+Purpose: Compare different network paths (VPN vs direct if applicable)
+
+Targets:
+
+same endpoint via different routes if configured
+
+Panels:
+
+Time series comparing latency per target
+Stat panel for success
+
+General Requirements:
+
+All new rows should be collapsed by default
+Use consistent naming and panel styling with the existing dashboard
+Group panels logically within each row
+Use clear labels for targets
+Do not duplicate existing panels
+Keep layout clean and readable
+
+End result should feel like an extension of a professional observability dashboard, not clutter.

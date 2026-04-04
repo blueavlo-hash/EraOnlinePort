@@ -1,0 +1,12 @@
+type: leaky
+name: custom/eraonline-protocol-abuse
+description: "Era Online: repeated protocol errors from one IP (fuzzing/scanning)"
+filter: "evt.Meta.log_type == 'protocol_error'"
+groupby: evt.Meta.source_ip
+capacity: 10
+leakspeed: "10s"
+blackhole: 5m
+labels:
+  service: eraonline
+  type: protocol_abuse
+  remediation: true

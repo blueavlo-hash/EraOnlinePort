@@ -55,6 +55,20 @@ func (m *MapData) HasGroundTiles() bool {
 	return false
 }
 
+// HasAnyExit returns true if the map has at least one exit (cardinal or tile).
+// Maps with no exits are dead ends and treated as incomplete.
+func (m *MapData) HasAnyExit() bool {
+	if m.NorthExit > 0 || m.SouthExit > 0 || m.WestExit > 0 || m.EastExit > 0 {
+		return true
+	}
+	for _, t := range m.Tiles {
+		if t.ExitMap > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // NPCData holds one NPC definition.
 type NPCData struct {
 	Index      int    `json:"index"`

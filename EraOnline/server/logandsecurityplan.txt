@@ -1,0 +1,328 @@
+  One important caveat: no secret embedded in a client is truly safe from reverse engineering. You should assume a determined attacker can eventually recover it. So this mechanism is useful as a bot/friction filter and signal source, not as a cryptographic proof of
+  legitimacy. It still has real value for a game server if you treat it that way.
+
+  Here is the rewritten plan.
+
+  Goal
+  Build a security telemetry and enforcement model for the Era Online Go server that:
+
+  - logs game-relevant abuse in a stable parseable format
+  - supports direct grep/journal review
+  - feeds CrowdSec with meaningful custom events
+  - keeps nftables as the fast first-line protection
+  - adds invalid_client as a high-value signal for unofficial/bot/fuzzing clients
+
+  Core Principles
+
+  - App-level visibility is the source of truth for 6969/6970.
+  - nftables handles cheap connection-level abuse.
+  - CrowdSec should consume structured app security events, not raw gameplay noise.
+  - Larger scenario coverage is good, but enforcement should be tiered.
+  - invalid_client is useful, but should be treated as a heuristic trust signal, not absolute proof.
+
+  How The Server Should Log
+  Use one security-focused event stream in a stable format.
+
+  Preferred format:
+
+  - logfmt or JSON lines
+  - one event per line
+  - fixed key names
+  - normalized reason values
+  - no multiline entries
+  - no prose-heavy text
+
+  Recommended common fields on every event:
+
+  - ts
+  - event
+  - ip
+  - remote_port
+  - listen_port
+  - conn_id
+  - account
+  - character_id
+  - result
+  - reason
+  - count
+  - window_sec
+  - opcode
+  - state
+  - build
+  - client_id
+  - client_attestation
+  - server_action
+
+  Example:
+
+  ts=2026-03-23T20:14:02Z event=auth_fail ip=1.2.3.4 listen_port=6969 conn_id=c8f2 account=test result=deny reason=bad_password
+  ts=2026-03-23T20:14:08Z event=invalid_client ip=1.2.3.4 listen_port=6969 conn_id=c8f2 result=deny reason=bad_attestation client_attestation=missing build=unknown
+  ts=2026-03-23T20:14:11Z event=protocol_error ip=1.2.3.4 listen_port=6970 conn_id=c901 result=drop reason=invalid_opcode opcode=145
+
+  Event Types To Implement
+  Connection lifecycle:
+
+  - conn_open
+  - conn_close
+  - short_session
+  - session_limit_hit
+
+  Handshake and client identity:
+
+  - handshake_fail
+  - version_mismatch
+  - invalid_client
+  - client_attestation_fail
+  - client_attestation_replay
+  - client_build_rejected
+
+  Authentication:
+
+  - auth_attempt
+  - auth_success
+  - auth_fail
+  - auth_fail_burst
+  - account_lockout
+
+  Protocol and parser abuse:
+
+  - protocol_error
+  - invalid_message
+  - invalid_opcode
+  - oversized_packet
+  - state_violation
+  - suspicious_sequence
+  - malformed_payload_burst
+
+  API and launcher behavior on 6970:
+
+  - api_auth_fail
+  - api_rate_limit_hit
+  - api_invalid_route
+  - api_invalid_payload
+  - token_validation_fail
+
+  Enforcement-related:
+
+  - rate_limit_hit
+  - server_ban_applied
+  - server_deny_applied
+  - server_cooldown_applied
+
+  Invalid Client Design
+  Add invalid_client as a top-level event category.
+
+  What it should mean:
+
+  - the client failed the official-client attestation step
+  - the client omitted the required proof
+  - the proof was malformed, expired, replayed, or bound to the wrong build/session
+
+  Recommended sub-reasons:
+
+  - missing_attestation
+  - bad_attestation
+  - expired_attestation
+  - replayed_attestation
+  - build_mismatch
+  - unknown_client_id
+
+  Important design note:
+
+  - do not rely on a single static shared secret in the binary if avoidable
+  - better is a challenge/response tied to session/build/version
+  - still assume reverse engineers can recover enough to emulate it eventually
+
+  So treat invalid_client as:
+
+  - very useful for filtering mass scanners, crude bots, protocol fuzzers, and off-the-shelf fake clients
+  - not sufficient alone to define “official client” against a determined adversary
+
+  Expanded Scenario Catalog
+  Design a broad scenario inventory from the start.
+
+  Authentication scenarios:
+
+  - repeated failed login from one IP
+  - login spray across many accounts from one IP
+  - distributed failures against one account from many IPs
+  - success after many failures from same IP
+  - success after spray pattern
+  - nonexistent-account spray
+  - blocked-version login attempts
+
+  Connection scenarios:
+
+  - reconnect flood from one IP
+  - excessive simultaneous sessions from one IP
+  - repeated short-lived sessions
+  - connect-disconnect churn before handshake
+  - repeated opens to 6969
+  - repeated opens to 6970
+
+  Handshake/client trust scenarios:
+
+  - repeated handshake failure from one IP
+  - repeated version mismatch from one IP
+  - repeated invalid_client from one IP
+  - repeated missing attestation from one IP
+  - repeated bad attestation from one IP
+  - replayed attestation attempts
+  - invalid client attempts against many accounts
+  - invalid client followed by protocol fuzzing
+  - invalid client bursts on 6969
+  - invalid client bursts on 6970
+
+  Protocol abuse scenarios:
+
+  - invalid header flood
+  - invalid opcode flood
+  - malformed packet flood
+  - state violation flood
+  - oversized packet flood
+  - impossible unauthenticated action flood
+  - parser/fuzzer signature pattern
+  - repeated unexpected message order
+
+  Game-semantic scenarios:
+
+  - repeated world-entry attempts without auth
+  - repeated entity/action requests before ready state
+  - repeated inventory/shop/bank/trade actions in invalid state
+  - repeated admin/debug opcode attempts
+  - suspicious hidden/internal object access attempts
+  - impossible action ordering
+  - impossible action rate
+
+  Account/session scenarios:
+
+  - too many accounts from one IP
+  - too many characters from one account in short window
+  - duplicate login collision spam
+  - lockout triggers across many accounts from one IP
+  - session fanout from one IP
+
+  API/launcher scenarios:
+
+  - repeated API auth failure
+  - invalid route flood
+  - invalid payload flood
+  - token validation failure burst
+  - abnormal bootstrap/version polling
+  - request flood on 6970
+
+  Cross-signal scenarios:
+
+  - SSH scan plus game-port abuse from same IP/subnet
+  - invalid client plus auth spray
+  - invalid client plus malformed protocol burst
+  - Suricata anomaly plus app-level protocol errors
+  - firewall rate-limit hit plus app abuse events
+
+  Enforcement Tiers
+  A large scenario list should not mean “ban everything.”
+
+  Tier 0: Observe only
+
+  - distributed account attacks
+  - unusual timing anomalies
+  - edge-case gameplay semantic anomalies
+  - anything with higher false-positive risk
+
+  Tier 1: In-app throttle/deny
+
+  - repeated auth failures
+  - reconnect floods
+  - version mismatch spam
+  - session fanout
+  - repeated missing attestation
+  - repeated invalid client on a short window
+
+  Tier 2: Short ban
+
+  - bad attestation bursts
+  - attestation replay
+  - malformed protocol flood
+  - invalid opcode flood
+  - impossible unauthenticated action spam
+  - repeated API malformed payloads
+
+  Tier 3: Long ban/manual review
+
+  - repeated bans across time
+  - invalid client plus exploit behavior
+  - admin/debug opcode targeting
+  - replay/forgery patterns
+  - correlated SSH plus game abuse
+  - repeated cross-port abuse from same infra
+
+  How To Treat invalid_client Specifically
+  Recommended enforcement:
+
+  - single invalid_client: deny connection, log only
+  - repeated missing_attestation: short cooldown or throttle
+  - repeated bad_attestation: short ban candidate
+  - replayed_attestation: high-confidence hostile, escalate faster
+  - invalid_client plus protocol_error burst: strong ban signal
+  - invalid_client plus auth_fail spray across accounts: strong ban signal
+
+  Reasoning:
+
+  - some invalid-client hits may come from stale dev clients or version drift
+  - repeated or replay-style failures are much more hostile than one miss
+
+  Best Rule Strategy
+  Do not make CrowdSec infer everything from raw lines alone. Let the app emit both raw and aggregate security events.
+
+  Useful aggregate events:
+
+  - auth_fail_burst
+  - invalid_client_burst
+  - protocol_error_burst
+  - reconnect_burst
+  - api_fail_burst
+
+  Example:
+
+  ts=2026-03-23T20:20:00Z event=invalid_client_burst ip=1.2.3.4 count=8 window_sec=120 reason=bad_attestation server_action=deny
+  ts=2026-03-23T20:20:05Z event=protocol_error_burst ip=1.2.3.4 count=12 window_sec=60 reason=invalid_opcode server_action=drop
+
+  That makes CrowdSec scenarios simpler and safer.
+
+  What CrowdSec Should Ultimately Do
+  CrowdSec should consume:
+
+  - the app security event stream
+  - SSH logs
+  - Suricata eve.json
+  - kernel/firewall logs if useful
+
+  CrowdSec should enforce only on:
+
+  - high-confidence threshold events
+  - repeated trust failures like invalid_client_burst
+  - protocol abuse bursts
+  - auth spray bursts
+  - combined-signal scenarios
+
+  Updated Implementation Plan
+
+  1. Define a stable security event schema for the Go server.
+  2. Add all core event types, including invalid_client.
+  3. Implement a client attestation step and log explicit failure reasons.
+  4. Emit both raw events and aggregate threshold events.
+  5. Keep nftables as the first-line guard for 6969/6970.
+  6. Feed the security stream to journald or a dedicated file.
+  7. Build a custom CrowdSec parser for the event format.
+  8. Define the full broad scenario catalog now.
+  9. Enable only the highest-confidence scenario subset first.
+  10. Expand enforcement after reviewing real traffic and false positives.
+
+  Bottom Line
+  Yes, the best setup is:
+
+  - add richer app security events
+  - include invalid_client as a first-class event
+  - log everything in a rigid parseable format with the IP
+  - use a broad scenario inventory from the start
+  - stage enforcement carefully so game traffic does not get over-banned

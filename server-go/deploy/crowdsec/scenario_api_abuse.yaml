@@ -1,0 +1,12 @@
+type: leaky
+name: custom/eraonline-api-abuse
+description: "Era Online: repeated API abuse (invalid payloads/routes) from one IP"
+filter: "evt.Meta.log_type in ['api_invalid_payload', 'api_invalid_route']"
+groupby: evt.Meta.source_ip
+capacity: 15
+leakspeed: "10s"
+blackhole: 5m
+labels:
+  service: eraonline
+  type: api_abuse
+  remediation: true

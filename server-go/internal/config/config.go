@@ -16,6 +16,7 @@ type Config struct {
 	Database DatabaseCfg `yaml:"database"`
 	Game     GameCfg     `yaml:"game"`
 	Log      LogCfg      `yaml:"log"`
+	SecLog   SecLogCfg   `yaml:"seclog"`
 	Admin    AdminCfg    `yaml:"admin"`
 }
 
@@ -85,6 +86,13 @@ type LogCfg struct {
 	File string `yaml:"file"`
 }
 
+// SecLogCfg holds security event log settings.
+type SecLogCfg struct {
+	// File path for the security event log (logfmt format, one event per line).
+	// Empty disables security logging.
+	File string `yaml:"file"`
+}
+
 // AdminCfg holds admin API settings.
 type AdminCfg struct {
 	// Addr is the TCP address for the admin API listener.
@@ -129,8 +137,8 @@ func defaults() *Config {
 			TickRateMS:       250,
 			CombatTickMS:     4000,
 			SpawnMap:         3,
-			SpawnX:           50,
-			SpawnY:           50,
+			SpawnX:           10, // Gap 24: original spawn = 10,10
+			SpawnY:           10, // Gap 24: original spawn = 10,10
 			GameDataDir:      "../EraOnline/data",
 			NightBrightness:  0.25,
 			DayLengthSeconds: 7200,
@@ -138,6 +146,9 @@ func defaults() *Config {
 		Log: LogCfg{
 			Level:  "info",
 			Format: "text",
+		},
+		SecLog: SecLogCfg{
+			File: "/var/log/era-online/security.log",
 		},
 		Admin: AdminCfg{
 			Addr: "127.0.0.1:6971",

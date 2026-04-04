@@ -18,6 +18,7 @@ import (
 	"github.com/blueavlo-hash/eraonline-server/internal/config"
 	"github.com/blueavlo-hash/eraonline-server/internal/db"
 	"github.com/blueavlo-hash/eraonline-server/internal/gamedata"
+	"github.com/blueavlo-hash/eraonline-server/internal/seclog"
 	"github.com/blueavlo-hash/eraonline-server/internal/server"
 	"github.com/blueavlo-hash/eraonline-server/internal/world"
 )
@@ -39,6 +40,14 @@ func main() {
 		"game_addr", cfg.Server.GameAddr,
 		"http_addr", cfg.Server.HTTPAddr,
 	)
+
+	// Set up security event log.
+	sec, err := seclog.New(cfg.SecLog.File)
+	if err != nil {
+		log.Warn("security log unavailable", "err", err)
+		sec, _ = seclog.New("") // fall back to no-op
+	}
+	defer sec.Close()
 
 	// Open database.
 	database, err := db.Open(cfg.Database.Path, cfg.Database.MaxOpenConns)
@@ -71,14 +80,14 @@ func main() {
 	w := world.New(worldCfg, database, gd, log.With("component", "world"))
 
 	// Create game server.
-	srv, err := server.New(cfg, database, w, log.With("component", "server"))
+	srv, err := server.New(cfg, database, w, log.With("component", "server"), sec)
 	if err != nil {
 		log.Error("server setup failed", "err", err)
 		os.Exit(1)
 	}
 
 	// Create HTTP API (pass srv so it can issue launcher tokens).
-	httpSrv := server.NewHTTPServer(cfg.Server.HTTPAddr, database, w, srv, log.With("component", "http"))
+	httpSrv := server.NewHTTPServer(cfg.Server.HTTPAddr, database, w, srv, log.With("component", "http"), sec)
 
 	// Root context.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

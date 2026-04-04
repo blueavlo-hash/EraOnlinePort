@@ -1,0 +1,12 @@
+type: leaky
+name: custom/eraonline-auth-bf
+description: "Era Online: repeated authentication failures from one IP"
+filter: "evt.Meta.log_type in ['auth_fail', 'api_auth_fail']"
+groupby: evt.Meta.source_ip
+capacity: 5
+leakspeed: "30s"
+blackhole: 1m
+labels:
+  service: eraonline
+  type: bruteforce
+  remediation: true

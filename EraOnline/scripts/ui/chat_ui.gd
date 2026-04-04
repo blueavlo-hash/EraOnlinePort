@@ -175,6 +175,15 @@ func add_message(text: String, chat_type: int = 0) -> void:
 		1:  col = C_GOLD
 		2:  col = Color(0.9, 0.4, 0.2, 1.0)
 		_:  col = C_TEXT
+	_append_message(text, col)
+
+
+## Add a chat message with a specific color (used for rarity drops, etc.).
+func add_message_colored(text: String, color: Color) -> void:
+	_append_message(text, color)
+
+
+func _append_message(text: String, col: Color) -> void:
 
 	var lbl := Label.new()
 	lbl.text = text
@@ -302,10 +311,12 @@ func _on_send_pressed() -> void:
 	_send_message()
 
 
-func _on_net_chat(char_id: int, chat_type: int, message: String) -> void:
+func _on_net_chat(char_id: int, chat_type: int, message: String, char_name: String = "") -> void:
 	var prefix: String
 	if char_id == Network.local_char_id:
 		prefix = "[You]: "
+	elif char_name != "":
+		prefix = "[%s]: " % char_name
 	else:
 		prefix = "[%d]: " % char_id
 	add_message(prefix + message, chat_type)

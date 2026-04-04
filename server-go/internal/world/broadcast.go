@@ -56,12 +56,13 @@ func buildServerMsg(msg string) []byte {
 	return wr.Bytes()
 }
 
-// buildChat builds a S_CHAT payload.
-func buildChat(charID int32, chatType uint8, msg string) []byte {
-	wr := proto.NewWriter(8 + len(msg))
+// buildChat builds a S_CHAT payload (includes char_name so the client can display it).
+func buildChat(charID int32, chatType uint8, msg, charName string) []byte {
+	wr := proto.NewWriter(8 + len(msg) + len(charName))
 	wr.WriteI32(charID)
 	wr.WriteU8(chatType)
 	wr.WriteStr(msg)
+	wr.WriteStr(charName)
 	return wr.Bytes()
 }
 

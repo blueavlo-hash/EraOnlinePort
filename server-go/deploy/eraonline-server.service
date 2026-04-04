@@ -6,6 +6,8 @@ After=network-online.target
 Wants=network-online.target
 # If the SQLite WAL journal is on the same mount, ensure the filesystem is ready.
 After=local-fs.target
+StartLimitBurst=3
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -22,8 +24,6 @@ ExecReload=/bin/kill -HUP $MAINPID
 # Allow at most 3 restarts within 60 seconds before systemd gives up.
 Restart=always
 RestartSec=5
-StartLimitBurst=3
-StartLimitIntervalSec=60
 
 # -------------------------------------------------------------------------
 # Security hardening
@@ -38,6 +38,9 @@ PrivateTmp=true
 # Mount /usr, /boot, /etc read-only. The server only needs to write to
 # its own data/logs/backups directories.
 ProtectSystem=strict
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
 
 # Explicitly grant write access to the directories the server needs.
 ReadWritePaths=/opt/eraonline/data /opt/eraonline/logs /opt/eraonline/backups
@@ -57,21 +60,30 @@ ProtectKernelLogs=true
 # Hide other processes from /proc.
 ProtectProc=invisible
 
+# Use a minimal /dev view.
+PrivateDevices=true
+
 # Restrict the set of system calls this service may make to a safe subset.
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 
 # Prevent the process from acquiring new capabilities.
 CapabilityBoundingSet=
+AmbientCapabilities=
 
 # Restrict address families to IPv4/IPv6 and Unix sockets only.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
 
 # Prevent creating SUID/SGID files.
 RestrictSUIDSGID=true
 
 # Make all filesystems appear as if they have nosuid,nodev.
 MountFlags=slave
+UMask=0027
 
 # -------------------------------------------------------------------------
 # Resource limits

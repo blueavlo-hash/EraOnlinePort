@@ -1,0 +1,61 @@
+I want to expand it in two connected directions at the same time:
+
+1. Behavioral family tracking over time
+2. Deep per-session behavior profiling
+
+Please design a Python 3 module or set of modules that models both layers cleanly.
+
+Requirements:
+
+A. Family intelligence layer
+- Track normalized behavioral families over time
+- Each family should have a stable family_id
+- Store first_seen, last_seen, total_events, unique_ips, unique_usernames, unique_client_families, unique_countries, and top variants
+- Roll up variants into parent families where appropriate, such as:
+  - parent family: ctrl+upper-suffix
+  - subfamily: IN-variant
+  - variants: IN, INCO, INCOR
+- Track family spread and recurrence
+- Support simple “family evolution” notes when new variants appear under an existing family
+
+B. Session intelligence layer
+- Track per-session behavior including:
+  - session_id
+  - source_ip
+  - timestamp
+  - family_id linkage
+  - auth attempt count
+  - session duration
+  - delay/cadence between actions
+  - post-auth commands
+  - normalized command categories
+  - interactive vs scripted scoring
+  - automation likelihood
+  - engagement score
+- Normalize commands into higher-level categories such as:
+  - system-info
+  - identity-check
+  - file-read
+  - downloader
+  - execution
+  - persistence
+  - network-recon
+
+C. Family/session correlation
+- For each family, summarize:
+  - top commands
+  - common session styles
+  - average session duration
+  - most common usernames
+  - most common client families
+- For each session, attach analyst-friendly summaries that reference the linked family
+
+D. Output
+- Clean structured dicts or dataclasses
+- Dashboard-friendly summaries
+- Analyst-friendly one-line summary strings
+- Standard library only if possible
+- Production-friendly Python 3
+- Include sample test data and example outputs
+
+Do not implement alerting. Focus on enrichment, normalization, tracking, clustering, and correlation.

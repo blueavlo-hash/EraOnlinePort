@@ -5,7 +5,8 @@ import (
 	"github.com/blueavlo-hash/eraonline-server/internal/proto"
 )
 
-const maxBankSlots = 40
+// Gap 16: Bank slots = 20 (original EO3 value).
+const maxBankSlots = 20
 
 func (w *World) handleBankOpen(p *Player, payload []byte) {
 	r := proto.NewReader(payload)
@@ -99,7 +100,9 @@ func (w *World) handleBankDeposit(p *Player, payload []byte) {
 		}
 	}
 	if !deposited {
-		for i, bs := range p.BankItems {
+		// Only use slots 0..maxBankSlots-1 (Gap 16: cap = 20).
+		for i := 0; i < maxBankSlots; i++ {
+			bs := p.BankItems[i]
 			if bs == nil || bs.ObjIndex == 0 {
 				p.BankItems[i] = &db.InventorySlot{Slot: i, ObjIndex: item.ObjIndex, Amount: item.Amount}
 				deposited = true
