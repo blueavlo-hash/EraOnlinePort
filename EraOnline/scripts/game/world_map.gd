@@ -101,9 +101,6 @@ var _bounty_ui: Node = null
 var _event_ui:  Node = null
 var _enchanting_ui: Node = null
 
-## Map transition fade overlay
-var _fade_rect: ColorRect = null
-var _fade_tween: Tween = null
 
 ## World-space damage floaters drawn via _draw() using draw_string().
 ## Each entry: {text, wx, wy, alpha, color, timer}
@@ -209,15 +206,6 @@ func _ready() -> void:
 	Network.on_projectile.connect(_on_net_projectile)
 
 	# Map transition fade overlay (CanvasLayer so it covers the whole screen)
-	var _fade_layer := CanvasLayer.new()
-	_fade_layer.layer = 20
-	add_child(_fade_layer)
-	_fade_rect = ColorRect.new()
-	_fade_rect.color = Color(0, 0, 0, 1)
-	_fade_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_fade_rect.modulate.a = 0.0
-	_fade_layer.add_child(_fade_rect)
 
 	# HUD (always visible)
 	_hud_ui = preload("res://scripts/ui/hud_ui.gd").new()
@@ -2339,18 +2327,7 @@ func _on_net_remove_char(char_id: int) -> void:
 
 ## Server warped us to a different map (tile exit, spell, GM warp).
 func _on_net_map_change(map_id: int, x: int, y: int) -> void:
-	if _fade_rect == null:
-		_load_map_at(map_id, Vector2i(x, y))
-		return
-	# Quick fade out → load → fade in
-	if _fade_tween != null:
-		_fade_tween.kill()
-	_fade_tween = create_tween()
-	_fade_tween.tween_property(_fade_rect, "modulate:a", 1.0, 0.15) \
-		.set_ease(Tween.EASE_IN)
-	_fade_tween.tween_callback(_load_map_at.bind(map_id, Vector2i(x, y)))
-	_fade_tween.tween_property(_fade_rect, "modulate:a", 0.0, 0.25) \
-		.set_ease(Tween.EASE_OUT)
+	_load_map_at(map_id, Vector2i(x, y))
 
 
 ## Server triggered a sound effect.

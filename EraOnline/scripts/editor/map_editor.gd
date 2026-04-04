@@ -46,6 +46,16 @@ var _pan_start_screen:  Vector2 = Vector2.ZERO
 var _pan_offset_start:  Vector2 = Vector2.ZERO
 var _space_held:        bool    = false
 
+# ── Walk mode ─────────────────────────────────────────────────────────────────
+var _walk_mode:         bool     = false
+var _walk_pos:          Vector2i = Vector2i(50, 50)
+var _walk_move_timer:   float    = 0.0   # cooldown between steps when key held
+const WALK_INITIAL_DELAY := 0.25        # seconds before repeat kicks in
+const WALK_REPEAT_DELAY  := 0.12        # seconds between repeat steps
+var _walk_key_held:     Vector2i = Vector2i.ZERO
+var _walk_key_timer:    float    = 0.0
+var _walk_mode_btn:     Button   = null
+
 # ── Tool state ────────────────────────────────────────────────────────────────
 var _current_tool:  Tool = Tool.PAINT
 var _active_layer:  int  = 1   # 0=L1, 1=L2, 2=L3
@@ -135,18 +145,41 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if not GameData.is_loaded:
 		return
-	# Arrow key panning (held down, 400 world-px/s, faster with Shift)
-	var pan_speed := 600.0 / _zoom * delta
-	if Input.is_key_pressed(KEY_SHIFT):
-		pan_speed *= 3.0
-	var moved := false
-	if Input.is_key_pressed(KEY_LEFT)  or Input.is_key_pressed(KEY_A): _pan_offset.x -= pan_speed; moved = true
-	if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D): _pan_offset.x += pan_speed; moved = true
-	if Input.is_key_pressed(KEY_UP)    or Input.is_key_pressed(KEY_W): _pan_offset.y -= pan_speed; moved = true
-	if Input.is_key_pressed(KEY_DOWN)  or Input.is_key_pressed(KEY_S): _pan_offset.y += pan_speed; moved = true
-	if moved:
-		_clamp_pan()
-		_update_canvas_transform()
+	if _walk_mode:
+		# Walk mode: WASD/arrows step the cursor tile-by-tile with repeat
+		var walk_dir := Vector2i.ZERO
+		if Input.is_key_pressed(KEY_LEFT)  or Input.is_key_pressed(KEY_A): walk_dir = Vector2i(-1, 0)
+		elif Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D): walk_dir = Vector2i(1, 0)
+		elif Input.is_key_pressed(KEY_UP)   or Input.is_key_pressed(KEY_W): walk_dir = Vector2i(0, -1)
+		elif Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S): walk_dir = Vector2i(0, 1)
+
+		if walk_dir != Vector2i.ZERO:
+			if walk_dir != _walk_key_held:
+				# New direction — step immediately, start hold timer
+				_walk_key_held  = walk_dir
+				_walk_key_timer = WALK_INITIAL_DELAY
+				_walk_step(walk_dir)
+			else:
+				_walk_key_timer -= delta
+				if _walk_key_timer <= 0.0:
+					_walk_key_timer = WALK_REPEAT_DELAY
+					_walk_step(walk_dir)
+		else:
+			_walk_key_held  = Vector2i.ZERO
+			_walk_key_timer = 0.0
+	else:
+		# Arrow key panning (held down, 600 world-px/s, faster with Shift)
+		var pan_speed := 600.0 / _zoom * delta
+		if Input.is_key_pressed(KEY_SHIFT):
+			pan_speed *= 3.0
+		var moved := false
+		if Input.is_key_pressed(KEY_LEFT)  or Input.is_key_pressed(KEY_A): _pan_offset.x -= pan_speed; moved = true
+		if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D): _pan_offset.x += pan_speed; moved = true
+		if Input.is_key_pressed(KEY_UP)    or Input.is_key_pressed(KEY_W): _pan_offset.y -= pan_speed; moved = true
+		if Input.is_key_pressed(KEY_DOWN)  or Input.is_key_pressed(KEY_S): _pan_offset.y += pan_speed; moved = true
+		if moved:
+			_clamp_pan()
+			_update_canvas_transform()
 	# Advance tile animation at ~30fps
 	_tile_anim_acc += delta
 	var ticks := int(_tile_anim_acc * 30.0)
@@ -205,6 +238,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_EQUAL, KEY_KP_ADD:    _apply_zoom(1.2, Vector2(_viewport.size) * 0.5)
 		KEY_MINUS, KEY_KP_SUBTRACT: _apply_zoom(1.0 / 1.2, Vector2(_viewport.size) * 0.5)
 		KEY_0: _zoom = 1.5; _apply_zoom(1.0, Vector2(_viewport.size) * 0.5)
+		KEY_F5:
+			_set_walk_mode(not _walk_mode)
 		KEY_ESCAPE:
 			if _exit_step > 0:
 				_exit_step = 0; _exit_source = Vector2i(-1,-1)
@@ -696,6 +731,13 @@ func _on_canvas_draw() -> void:
 		_canvas.draw_rect(Rect2((es.x-1)*TILE, (es.y-1)*TILE, TILE, TILE),
 				Color(1, 0.7, 0, 1.0), false, 2.5)
 
+	# Walk mode player cursor
+	if _walk_mode:
+		var wx := (_walk_pos.x - 1) * TILE
+		var wy := (_walk_pos.y - 1) * TILE
+		_canvas.draw_rect(Rect2(wx, wy, TILE, TILE), Color(0.2, 1.0, 0.3, 0.35))
+		_canvas.draw_rect(Rect2(wx, wy, TILE, TILE), Color(0.2, 1.0, 0.3, 1.0), false, 2.5)
+
 
 func _draw_grh(grh_index: int, wx: float, wy: float, centered: bool) -> void:
 	if grh_index <= 0: return
@@ -815,6 +857,75 @@ func _load_map(map_id: int) -> void:
 	_update_title()
 	_status_label.text = "Loaded Map %d — %s  (%d tiles)" % [
 			map_id, _map_meta["name"], _tiles.size()]
+
+
+## Toggle walk mode on/off.
+func _set_walk_mode(enabled: bool) -> void:
+	_walk_mode = enabled
+	if _walk_mode_btn:
+		_walk_mode_btn.button_pressed = enabled
+	if enabled:
+		# Start walk cursor at map center if not already set
+		if _walk_pos.x < 1 or _walk_pos.x > 100 or _walk_pos.y < 1 or _walk_pos.y > 100:
+			_walk_pos = Vector2i(50, 50)
+		_walk_snap_camera()
+		_status_label.text = "Walk Mode ON — WASD/arrows to walk, edges auto-load adjacent maps. F5 to exit."
+	else:
+		_status_label.text = "Walk Mode OFF."
+	_canvas.queue_redraw()
+
+
+## Center the camera on the walk cursor.
+func _walk_snap_camera() -> void:
+	var world_center := Vector2((_walk_pos.x - 1) * TILE + TILE * 0.5,
+								(_walk_pos.y - 1) * TILE + TILE * 0.5)
+	var vp_half := Vector2(_viewport.size) / (2.0 * _zoom)
+	_pan_offset = world_center - vp_half
+	_clamp_pan()
+	_update_canvas_transform()
+
+
+## Attempt to move the walk cursor in a direction. Handles map transitions.
+func _walk_step(dir: Vector2i) -> void:
+	var nx := _walk_pos.x + dir.x
+	var ny := _walk_pos.y + dir.y
+
+	# Cardinal exit thresholds (matches VB6 / game server)
+	const EXIT_N := 7;  const SPAWN_N := 94
+	const EXIT_S := 94; const SPAWN_S := 7
+	const EXIT_W := 9;  const SPAWN_W := 91
+	const EXIT_E := 92; const SPAWN_E := 10
+
+	var next_map := 0
+	var next_x   := nx
+	var next_y   := ny
+
+	if ny < EXIT_N:
+		next_map = int(_map_meta.get("north_exit", 0))
+		next_x = nx; next_y = SPAWN_N
+	elif ny > EXIT_S:
+		next_map = int(_map_meta.get("south_exit", 0))
+		next_x = nx; next_y = SPAWN_S
+	elif nx < EXIT_W:
+		next_map = int(_map_meta.get("west_exit", 0))
+		next_x = SPAWN_W; next_y = ny
+	elif nx > EXIT_E:
+		next_map = int(_map_meta.get("east_exit", 0))
+		next_x = SPAWN_E; next_y = ny
+
+	if next_map > 1:
+		# Auto-save dirty map before transitioning
+		if _map_dirty and _map_id > 0:
+			_save_map()
+		_walk_pos = Vector2i(next_x, next_y)
+		_load_map(next_map)
+		_walk_snap_camera()
+		return
+
+	# Normal step — clamp to map bounds
+	_walk_pos = Vector2i(clampi(nx, 1, 100), clampi(ny, 1, 100))
+	_walk_snap_camera()
+	_canvas.queue_redraw()
 
 
 func _save_map() -> void:
@@ -1357,6 +1468,14 @@ func _build_toolbar() -> HBoxContainer:
 	tb.add_child(VSeparator.new())
 	_zoom_label = Label.new(); _zoom_label.text = "%d%%" % int(_zoom * 100); _zoom_label.custom_minimum_size.x = 50
 	tb.add_child(_zoom_label)
+
+	tb.add_child(VSeparator.new())
+	_walk_mode_btn = Button.new()
+	_walk_mode_btn.text = "🚶 Walk [F5]"
+	_walk_mode_btn.toggle_mode = true
+	_walk_mode_btn.tooltip_text = "Walk Mode — navigate with WASD/arrows, auto-transitions between maps"
+	_walk_mode_btn.toggled.connect(_set_walk_mode)
+	tb.add_child(_walk_mode_btn)
 
 	_set_tool(Tool.PAINT)
 	return tb

@@ -412,16 +412,16 @@ func _build_create_panel(parent: Control) -> Control:
 	_create_status.add_theme_font_size_override("font_size", 12)
 	_create_status.add_theme_color_override("font_color", C_DIM)
 	_create_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_create_status.size = Vector2(620, 20); _create_status.position = Vector2(10, 422)
+	_create_status.size = Vector2(620, 20); _create_status.position = Vector2(10, 392)
 	p.add_child(_create_status)
 
 	_create_submit = _make_button("Create", C_GREEN, C_GREEN_HV)
-	_create_submit.size = Vector2(295, 40); _create_submit.position = Vector2(10, 422)
+	_create_submit.size = Vector2(295, 40); _create_submit.position = Vector2(10, 418)
 	_create_submit.pressed.connect(_on_create_pressed)
 	p.add_child(_create_submit)
 
 	var cancel_btn := _make_button("Cancel", C_BTN, C_BTN_HV)
-	cancel_btn.size = Vector2(295, 40); cancel_btn.position = Vector2(335, 422)
+	cancel_btn.size = Vector2(295, 40); cancel_btn.position = Vector2(335, 418)
 	cancel_btn.pressed.connect(func(): _create_panel.visible = false)
 	p.add_child(cancel_btn)
 
