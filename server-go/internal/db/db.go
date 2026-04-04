@@ -46,6 +46,8 @@ func (db *DB) migrate() error {
 	}
 	// Additive column migrations (ignored if column already exists).
 	_, _ = db.sql.Exec(`ALTER TABLE inventory ADD COLUMN enchant INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.sql.Exec(`ALTER TABLE characters ADD COLUMN bounty INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.sql.Exec(`ALTER TABLE characters ADD COLUMN active_title TEXT NOT NULL DEFAULT 'Novice'`)
 	return nil
 }
 
