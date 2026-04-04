@@ -46,16 +46,18 @@ func (w *World) handleMove(p *Player, payload []byte) {
 			exitN, exitS, exitW, exitE     = 7, 94, 9, 92
 			spawnN, spawnS, spawnW, spawnE = 94, 7, 91, 10
 		)
-		if ny < exitN && m.NorthExit > 1 {
+		// Cardinal exits — only warp if the destination tile is walkable
+		// (matches VB6 LegalPos check before WarpUserChar).
+		if ny < exitN && m.NorthExit > 1 && w.isTileWalkable(m.NorthExit, nx, spawnN) {
 			w.warpPlayer(p, m.NorthExit, nx, spawnN)
 			return
-		} else if ny > exitS && m.SouthExit > 1 {
+		} else if ny > exitS && m.SouthExit > 1 && w.isTileWalkable(m.SouthExit, nx, spawnS) {
 			w.warpPlayer(p, m.SouthExit, nx, spawnS)
 			return
-		} else if nx < exitW && m.WestExit > 1 {
+		} else if nx < exitW && m.WestExit > 1 && w.isTileWalkable(m.WestExit, spawnW, ny) {
 			w.warpPlayer(p, m.WestExit, spawnW, ny)
 			return
-		} else if nx > exitE && m.EastExit > 1 {
+		} else if nx > exitE && m.EastExit > 1 && w.isTileWalkable(m.EastExit, spawnE, ny) {
 			w.warpPlayer(p, m.EastExit, spawnE, ny)
 			return
 		}

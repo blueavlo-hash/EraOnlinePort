@@ -407,7 +407,12 @@ func _load_map_at(map_id: int, spawn: Vector2i) -> void:
 	cur_map_id         = map_id
 	_attack_anim_timer = 0.0
 	_tiles     = map.get("tiles", {})
-	cam_tile   = _safe_spawn(spawn, _tiles)
+	# Trust server-provided spawn directly — server validates walkability.
+	# Only fall back to _safe_spawn for offline/debug mode.
+	if Network.state == Network.State.CONNECTED:
+		cam_tile = spawn
+	else:
+		cam_tile = _safe_spawn(spawn, _tiles)
 	_cam_target = Vector2(cam_tile * TILE)
 	_cam_pixel  = _cam_target        # snap camera instantly
 	if is_inside_tree():
