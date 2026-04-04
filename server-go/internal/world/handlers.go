@@ -46,16 +46,16 @@ func (w *World) handleMove(p *Player, payload []byte) {
 			exitN, exitS, exitW, exitE     = 7, 94, 9, 92
 			spawnN, spawnS, spawnW, spawnE = 94, 7, 91, 10
 		)
-		if ny < exitN && m.NorthExit > 0 {
+		if ny < exitN && m.NorthExit > 1 {
 			w.warpPlayer(p, m.NorthExit, nx, spawnN)
 			return
-		} else if ny > exitS && m.SouthExit > 0 {
+		} else if ny > exitS && m.SouthExit > 1 {
 			w.warpPlayer(p, m.SouthExit, nx, spawnS)
 			return
-		} else if nx < exitW && m.WestExit > 0 {
+		} else if nx < exitW && m.WestExit > 1 {
 			w.warpPlayer(p, m.WestExit, spawnW, ny)
 			return
-		} else if nx > exitE && m.EastExit > 0 {
+		} else if nx > exitE && m.EastExit > 1 {
 			w.warpPlayer(p, m.EastExit, spawnE, ny)
 			return
 		}
