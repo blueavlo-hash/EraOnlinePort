@@ -97,13 +97,12 @@ type Player struct {
 
 	// Gap 20: Titles unlocked by the player.
 	TitleIDs    []int
-	ActiveTitle int // currently displayed title ID (0 = default "Novice")
-
-	// Bounty (gold on this player's head).
-	Bounty int
 
 	// Active title string displayed before character name.
 	ActiveTitle string
+
+	// Bounty (gold on this player's head).
+	Bounty int
 
 	// Login streak (loaded from DB on join, not persisted on Player directly — see handleJoin).
 	LoginStreak    int
