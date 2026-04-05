@@ -52,6 +52,10 @@ var _night_overlay: ColorRect    = null   # tints minimap at night
 
 ## GRH index → averaged Color. Persists across map loads since GRH data is global.
 var _grh_color_cache: Dictionary = {}
+## Cached neighbor edge strips: direction → {map_id, tex}
+var _neighbor_strip_cache: Dictionary = {}
+## How many tiles of neighbor to show on each edge.
+const NEIGHBOR_STRIP := 10
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -79,6 +83,7 @@ func update_map(tiles: Dictionary, map_name: String = "") -> void:
 	## layer2 on top so terrain, trees, and buildings all show through.
 	if not map_name.is_empty():
 		_name_label.text = map_name
+	_neighbor_strip_cache.clear()  # regenerate neighbor strips for new map
 
 	# 2 pixels per tile → paths that are 1 tile wide become 2px lines
 	var img := Image.create(MAP_IMG, MAP_IMG, false, Image.FORMAT_RGB8)
@@ -89,32 +94,7 @@ func update_map(tiles: Dictionary, map_name: String = "") -> void:
 
 	for y in range(1, 101):
 		for x in range(1, 101):
-			var tile: Dictionary = tiles.get("%d,%d" % [y, x], {})
-			var blocked: bool    = tile.get("blocked", 0) != 0
-			var col: Color       = C_BLOCK if blocked else C_OPEN
-
-			if _world != null:
-				var layers: Array = tile.get("layers", [])
-				var grh1: int = layers[0] if layers.size() > 0 else 0
-				var grh2: int = layers[1] if layers.size() > 1 else 0
-
-				# Layer 1 — ground/base terrain
-				if grh1 > 0:
-					var c1 := _sample_grh(grh1, img_cache)
-					if c1.a > 0.05:
-						col = Color(c1.r, c1.g, c1.b, 1.0)
-
-				# Layer 2 — objects on the ground (trees, buildings, etc.)
-				# Only blend when layer2 has dense coverage (alpha = filled ratio).
-				# Keep the blend mild so layer1 terrain still reads through.
-				if grh2 > 0:
-					var c2 := _sample_grh(grh2, img_cache)
-					if c2.a > 0.5:
-						col = col.lerp(Color(c2.r, c2.g, c2.b, 1.0), 0.45)
-
-			# Darken blocked tiles so walls read clearly over any sampled colour.
-			if blocked:
-				col = col.darkened(0.45)
+			var col := _tile_color(tiles, x, y, img_cache)
 
 			# Write a px_per_tile × px_per_tile block for this tile.
 			var bx: int = (x - 1) * px_per_tile
@@ -258,6 +238,10 @@ func _draw_dots() -> void:
 	## Called from _MinimapDots._draw() — drawing commands execute on that node's canvas.
 	if _world == null:
 		return
+
+	# Draw neighbor edge strips (fading into the map edges).
+	_draw_neighbor_strips()
+
 	var chars: Dictionary = _world._chars
 	var player_idx: int   = _world._player_idx
 	var scale := float(MAP_PX) / 100.0
@@ -288,6 +272,143 @@ func _draw_dots() -> void:
 			Rect2(px - dot_size * 0.5, py - dot_size * 0.5, dot_size, dot_size),
 			col
 		)
+
+
+# ---------------------------------------------------------------------------
+# Neighbor edge strips on minimap
+# ---------------------------------------------------------------------------
+
+func _draw_neighbor_strips() -> void:
+	## Draw cached neighbor tile strips along the edges of the minimap.
+	var neighbor_ids: Dictionary = _world._neighbor_ids
+	var neighbor_tiles: Dictionary = _world._neighbor_tiles
+	var scale := float(MAP_PX) / 100.0
+	var strip_px := int(NEIGHBOR_STRIP * scale)
+
+	for dir in ["north", "south", "west", "east"]:
+		var nid: int = neighbor_ids.get(dir, 0)
+		if nid <= 0:
+			# No neighbor loaded — clear cache for this direction.
+			_neighbor_strip_cache.erase(dir)
+			continue
+
+		# Rebuild strip texture if neighbor changed.
+		var cached: Dictionary = _neighbor_strip_cache.get(dir, {})
+		if cached.get("map_id", 0) != nid:
+			var ntiles: Dictionary = neighbor_tiles.get(dir, {})
+			var tex := _build_strip_tex(dir, ntiles)
+			if tex != null:
+				_neighbor_strip_cache[dir] = {"map_id": nid, "tex": tex}
+			else:
+				_neighbor_strip_cache.erase(dir)
+				continue
+			cached = _neighbor_strip_cache[dir]
+
+		var tex: ImageTexture = cached.get("tex")
+		if tex == null:
+			continue
+
+		# Position the strip along the correct edge.
+		var rect: Rect2
+		match dir:
+			"north": rect = Rect2(0, -strip_px, MAP_PX, strip_px)
+			"south": rect = Rect2(0, MAP_PX, MAP_PX, strip_px)
+			"west":  rect = Rect2(-strip_px, 0, strip_px, MAP_PX)
+			"east":  rect = Rect2(MAP_PX, 0, strip_px, MAP_PX)
+		_dots_layer.draw_texture_rect(tex, rect, false)
+
+
+func _build_strip_tex(dir: String, ntiles: Dictionary) -> ImageTexture:
+	## Build a small image for the neighbor edge strip (with fade-out).
+	var px_per_tile: int = MAP_IMG / 100
+	var img_cache: Dictionary = {}
+	var img: Image
+
+	match dir:
+		"north":
+			# Bottom NEIGHBOR_STRIP rows of the north neighbor (tiles 101-STRIP..100)
+			img = Image.create(MAP_IMG, NEIGHBOR_STRIP * px_per_tile, false, Image.FORMAT_RGBA8)
+			for row in NEIGHBOR_STRIP:
+				var ty := 100 - NEIGHBOR_STRIP + 1 + row  # map tiles near south edge
+				var fade := float(row + 1) / float(NEIGHBOR_STRIP)  # 0→1 top to bottom
+				for x in range(1, 101):
+					var col := _tile_color(ntiles, x, ty, img_cache)
+					col.a = fade
+					var bx := (x - 1) * px_per_tile
+					var by := row * px_per_tile
+					for dy in px_per_tile:
+						for dx in px_per_tile:
+							img.set_pixel(bx + dx, by + dy, col)
+		"south":
+			# Top NEIGHBOR_STRIP rows of the south neighbor (tiles 1..STRIP)
+			img = Image.create(MAP_IMG, NEIGHBOR_STRIP * px_per_tile, false, Image.FORMAT_RGBA8)
+			for row in NEIGHBOR_STRIP:
+				var ty := 1 + row
+				var fade := 1.0 - float(row) / float(NEIGHBOR_STRIP)  # 1→0 top to bottom
+				for x in range(1, 101):
+					var col := _tile_color(ntiles, x, ty, img_cache)
+					col.a = fade
+					var bx := (x - 1) * px_per_tile
+					var by := row * px_per_tile
+					for dy in px_per_tile:
+						for dx in px_per_tile:
+							img.set_pixel(bx + dx, by + dy, col)
+		"west":
+			# Right NEIGHBOR_STRIP columns of the west neighbor (tiles 101-STRIP..100)
+			img = Image.create(NEIGHBOR_STRIP * px_per_tile, MAP_IMG, false, Image.FORMAT_RGBA8)
+			for col_idx in NEIGHBOR_STRIP:
+				var tx := 100 - NEIGHBOR_STRIP + 1 + col_idx
+				var fade := float(col_idx + 1) / float(NEIGHBOR_STRIP)
+				for y in range(1, 101):
+					var col := _tile_color(ntiles, tx, y, img_cache)
+					col.a = fade
+					var bx := col_idx * px_per_tile
+					var by := (y - 1) * px_per_tile
+					for dy in px_per_tile:
+						for dx in px_per_tile:
+							img.set_pixel(bx + dx, by + dy, col)
+		"east":
+			# Left NEIGHBOR_STRIP columns of the east neighbor (tiles 1..STRIP)
+			img = Image.create(NEIGHBOR_STRIP * px_per_tile, MAP_IMG, false, Image.FORMAT_RGBA8)
+			for col_idx in NEIGHBOR_STRIP:
+				var tx := 1 + col_idx
+				var fade := 1.0 - float(col_idx) / float(NEIGHBOR_STRIP)
+				for y in range(1, 101):
+					var col := _tile_color(ntiles, tx, y, img_cache)
+					col.a = fade
+					var bx := col_idx * px_per_tile
+					var by := (y - 1) * px_per_tile
+					for dy in px_per_tile:
+						for dx in px_per_tile:
+							img.set_pixel(bx + dx, by + dy, col)
+		_:
+			return null
+
+	return ImageTexture.create_from_image(img)
+
+
+func _tile_color(tiles: Dictionary, x: int, y: int, img_cache: Dictionary) -> Color:
+	## Sample the color of a single tile from a tile dictionary. Shared by minimap + strips.
+	var tile: Dictionary = tiles.get("%d,%d" % [y, x], {})
+	var blocked: bool = tile.get("blocked", 0) != 0
+	var col: Color = C_BLOCK if blocked else C_OPEN
+
+	if _world != null:
+		var layers: Array = tile.get("layers", [])
+		var grh1: int = layers[0] if layers.size() > 0 else 0
+		var grh2: int = layers[1] if layers.size() > 1 else 0
+		if grh1 > 0:
+			var c1 := _sample_grh(grh1, img_cache)
+			if c1.a > 0.05:
+				col = Color(c1.r, c1.g, c1.b, 1.0)
+		if grh2 > 0:
+			var c2 := _sample_grh(grh2, img_cache)
+			if c2.a > 0.5:
+				col = col.lerp(Color(c2.r, c2.g, c2.b, 1.0), 0.45)
+
+	if blocked:
+		col = col.darkened(0.45)
+	return col
 
 
 # ---------------------------------------------------------------------------

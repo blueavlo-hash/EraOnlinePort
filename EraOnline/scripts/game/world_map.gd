@@ -84,6 +84,10 @@ var _quest_ui: QuestUI = null
 var _quest_dialog_ui: QuestDialogUI = null
 ## Respawn destination held while death screen is showing; applied on player confirm.
 var _pending_respawn: Dictionary = {}
+## Last locally-predicted cardinal exit: {map_id, x, y} — suppresses server echo.
+var _local_exit_prediction: Dictionary = {}
+## Pre-seed reverse neighbor after cardinal exit: {dir, map_id, tiles}.
+var _pending_reverse_neighbor: Dictionary = {}
 ## SetChar packets buffered while the death screen is blocking _load_map_at.
 var _pending_set_chars: Array = []
 var _level_up_ui: Node = null
@@ -409,6 +413,12 @@ func _load_map_at(map_id: int, spawn: Vector2i) -> void:
 	_spell_effects.clear()
 	_neighbor_tiles.clear()
 	_neighbor_ids.clear()
+	# Pre-seed reverse neighbor: the map we just left renders behind us.
+	if not _pending_reverse_neighbor.is_empty():
+		var rdir: String = _pending_reverse_neighbor["dir"]
+		_neighbor_tiles[rdir] = _pending_reverse_neighbor["tiles"]
+		_neighbor_ids[rdir]   = _pending_reverse_neighbor["map_id"]
+		_pending_reverse_neighbor = {}
 	_chars.clear()
 	_ground_items.clear()
 	_corpses.clear()
@@ -925,6 +935,14 @@ func _finish_player_move() -> void:
 		dest_map = md.get("east_exit",  0); dest_x = SPAWN_E
 	if dest_map > 1:
 		print("[WorldMap] Cardinal exit → map %d @ (%d,%d)" % [dest_map, dest_x, dest_y])
+		_local_exit_prediction = {"map_id": dest_map, "x": dest_x, "y": dest_y}
+		# Pre-seed reverse neighbor so the old map renders behind us immediately.
+		var reverse_dir := ""
+		if cam_tile.y <= EXIT_N:   reverse_dir = "south"
+		elif cam_tile.y >= EXIT_S: reverse_dir = "north"
+		elif cam_tile.x <= EXIT_W: reverse_dir = "east"
+		elif cam_tile.x >= EXIT_E: reverse_dir = "west"
+		_pending_reverse_neighbor = {"dir": reverse_dir, "map_id": cur_map_id, "tiles": _tiles}
 		_load_map_at(dest_map, Vector2i(dest_x, dest_y))
 		return
 
@@ -2327,6 +2345,12 @@ func _on_net_remove_char(char_id: int) -> void:
 
 ## Server warped us to a different map (tile exit, spell, GM warp).
 func _on_net_map_change(map_id: int, x: int, y: int) -> void:
+	# Suppress duplicate if client already predicted this exact transition.
+	if not _local_exit_prediction.is_empty():
+		if _local_exit_prediction.get("map_id") == map_id:
+			_local_exit_prediction = {}
+			return
+		_local_exit_prediction = {}
 	_load_map_at(map_id, Vector2i(x, y))
 
 
