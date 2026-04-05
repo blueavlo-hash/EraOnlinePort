@@ -40,24 +40,23 @@ func (w *World) handleMove(p *Player, payload []byte) {
 			w.warpPlayer(p, tile.ExitMap, tile.ExitX, tile.ExitY)
 			return
 		}
-		// Cardinal map-edge exits (VB6: y<7=North, y>94=South, x<9=West, x>92=East).
-		// These are stored in map metadata, not per-tile, so check them explicitly.
+		// Cardinal map-edge exits — seamless edge-to-edge transitions.
+		// Trigger at the very edge (1 or 100), spawn 1 tile from opposite edge.
 		const (
-			exitN, exitS, exitW, exitE     = 7, 94, 9, 92
-			spawnN, spawnS, spawnW, spawnE = 94, 7, 91, 10
+			exitN, exitS, exitW, exitE     = 1, 100, 1, 100
+			spawnN, spawnS, spawnW, spawnE = 99, 2, 99, 2
 		)
-		// Cardinal exits — only warp if the destination tile is walkable
-		// (matches VB6 LegalPos check before WarpUserChar).
-		if ny < exitN && m.NorthExit > 1 && w.isTileWalkable(m.NorthExit, nx, spawnN) {
+		// Cardinal exits — only warp if the destination tile is walkable.
+		if ny <= exitN && m.NorthExit > 1 && w.isTileWalkable(m.NorthExit, nx, spawnN) {
 			w.warpPlayer(p, m.NorthExit, nx, spawnN)
 			return
-		} else if ny > exitS && m.SouthExit > 1 && w.isTileWalkable(m.SouthExit, nx, spawnS) {
+		} else if ny >= exitS && m.SouthExit > 1 && w.isTileWalkable(m.SouthExit, nx, spawnS) {
 			w.warpPlayer(p, m.SouthExit, nx, spawnS)
 			return
-		} else if nx < exitW && m.WestExit > 1 && w.isTileWalkable(m.WestExit, spawnW, ny) {
+		} else if nx <= exitW && m.WestExit > 1 && w.isTileWalkable(m.WestExit, spawnW, ny) {
 			w.warpPlayer(p, m.WestExit, spawnW, ny)
 			return
-		} else if nx > exitE && m.EastExit > 1 && w.isTileWalkable(m.EastExit, spawnE, ny) {
+		} else if nx >= exitE && m.EastExit > 1 && w.isTileWalkable(m.EastExit, spawnE, ny) {
 			w.warpPlayer(p, m.EastExit, spawnE, ny)
 			return
 		}

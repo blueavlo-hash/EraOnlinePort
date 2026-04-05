@@ -19,15 +19,15 @@ const VIEW_W          := 20       # Viewport width in tiles
 const VIEW_H          := 11       # Viewport height in tiles
 const MOVE_PX_PER_SEC := 240.0    # 8px * 30fps — matches original VB6 speed
 
-## Cardinal exit trigger zones — matches VB6 DoTileEvents() conditions.
-## North: cam_tile.y < EXIT_N  →  spawn at SPAWN_N on destination map
-## South: cam_tile.y > EXIT_S  →  spawn at SPAWN_S
-## West:  cam_tile.x < EXIT_W  →  spawn at SPAWN_W
-## East:  cam_tile.x > EXIT_E  →  spawn at SPAWN_E
-const EXIT_N  := 7;   const SPAWN_N := 94
-const EXIT_S  := 94;  const SPAWN_S := 7
-const EXIT_W  := 9;   const SPAWN_W := 91
-const EXIT_E  := 92;  const SPAWN_E := 10
+## Cardinal exit trigger zones — seamless edge-to-edge transitions.
+## North: cam_tile.y <= EXIT_N  →  spawn at SPAWN_N on destination map
+## South: cam_tile.y >= EXIT_S  →  spawn at SPAWN_S
+## West:  cam_tile.x <= EXIT_W  →  spawn at SPAWN_W
+## East:  cam_tile.x >= EXIT_E  →  spawn at SPAWN_E
+const EXIT_N  := 1;   const SPAWN_N := 99
+const EXIT_S  := 100; const SPAWN_S := 2
+const EXIT_W  := 1;   const SPAWN_W := 99
+const EXIT_E  := 100; const SPAWN_E := 2
 ## Preload neighbor map tiles this many tiles from the exit edge.
 const NEIGHBOR_PRELOAD := 12
 
@@ -915,13 +915,13 @@ func _finish_player_move() -> void:
 	var dest_map := 0
 	var dest_x   := cam_tile.x
 	var dest_y   := cam_tile.y
-	if cam_tile.y < EXIT_N:
+	if cam_tile.y <= EXIT_N:
 		dest_map = md.get("north_exit", 0); dest_y = SPAWN_N
-	elif cam_tile.y > EXIT_S:
+	elif cam_tile.y >= EXIT_S:
 		dest_map = md.get("south_exit", 0); dest_y = SPAWN_S
-	elif cam_tile.x < EXIT_W:
+	elif cam_tile.x <= EXIT_W:
 		dest_map = md.get("west_exit",  0); dest_x = SPAWN_W
-	elif cam_tile.x > EXIT_E:
+	elif cam_tile.x >= EXIT_E:
 		dest_map = md.get("east_exit",  0); dest_x = SPAWN_E
 	if dest_map > 1:
 		print("[WorldMap] Cardinal exit → map %d @ (%d,%d)" % [dest_map, dest_x, dest_y])

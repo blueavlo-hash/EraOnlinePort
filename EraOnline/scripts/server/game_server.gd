@@ -1162,17 +1162,16 @@ func _on_move(client, direction: int, time_now: float) -> void:
 			_teleport(client, dest_map, dest_x, dest_y)
 			return
 
-	# Cardinal exits (VB6: y<7=North, y>94=South, x<9=West, x>92=East).
-	# Skip map 1 (ocean): it has no return exits yet so players would get stranded.
+	# Cardinal exits — seamless edge-to-edge transitions.
 	var map_data := GameData.get_map(map_id)
-	if ny < 7 and map_data.get("north_exit", 0) > 1:
-		_teleport(client, map_data["north_exit"], nx, 94)
-	elif ny > 94 and map_data.get("south_exit", 0) > 1:
-		_teleport(client, map_data["south_exit"], nx, 7)
-	elif nx < 9 and map_data.get("west_exit", 0) > 1:
-		_teleport(client, map_data["west_exit"], 91, ny)
-	elif nx > 92 and map_data.get("east_exit", 0) > 1:
-		_teleport(client, map_data["east_exit"], 10, ny)
+	if ny <= 1 and map_data.get("north_exit", 0) > 1:
+		_teleport(client, map_data["north_exit"], nx, 99)
+	elif ny >= 100 and map_data.get("south_exit", 0) > 1:
+		_teleport(client, map_data["south_exit"], nx, 2)
+	elif nx <= 1 and map_data.get("west_exit", 0) > 1:
+		_teleport(client, map_data["west_exit"], 99, ny)
+	elif nx >= 100 and map_data.get("east_exit", 0) > 1:
+		_teleport(client, map_data["east_exit"], 2, ny)
 
 
 ## Find the nearest walkable tile at or near (x, y) on map_id.
