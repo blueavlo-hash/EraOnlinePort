@@ -105,6 +105,15 @@ var _bounty_ui: Node = null
 var _event_ui:  Node = null
 var _enchanting_ui: Node = null
 
+## Drunk visual overlay
+var _drunk_layer: CanvasLayer = null
+var _drunk_overlay: ColorRect = null
+var _drunk_remaining: float = 0.0
+var _drunk_duration: float = 0.0
+var _drunk_time: float = 0.0   # running time for oscillation
+
+const _FX_DRUNK := 5
+
 
 ## World-space damage floaters drawn via _draw() using draw_string().
 ## Each entry: {text, wx, wy, alpha, color, timer}
@@ -274,6 +283,10 @@ func _ready() -> void:
 	_context_menu.pickup_requested.connect(_on_context_pickup)
 	_context_menu.spell_cast_requested.connect(_on_context_spell_cast)
 	_context_menu.trade_requested.connect(_on_context_trade)
+	_context_menu.duel_requested.connect(_on_context_duel)
+	_context_menu.carry_requested.connect(_on_context_carry)
+	_context_menu.pickpocket_requested.connect(_on_context_pickpocket)
+	_context_menu.marry_requested.connect(_on_context_marry)
 
 	# Skill progress bar (layer 11 — above HUD)
 	_skill_progress_ui = preload("res://scripts/ui/skill_progress_ui.gd").new()
@@ -341,9 +354,12 @@ func _ready() -> void:
 	_enchanting_ui = preload("res://scripts/ui/enchanting_ui.gd").new()
 	add_child(_enchanting_ui)
 
-	# Day/night lighting — CanvasModulate tints the whole scene
+	# Day/night lighting — CanvasModulate tints the world canvas only.
+	# layer_range_max = 0 ensures UI layers (HUD=10, etc.) are not darkened at night.
 	_canvas_mod = CanvasModulate.new()
 	_canvas_mod.color = Color.WHITE
+	_canvas_mod.layer_range_min = 0
+	_canvas_mod.layer_range_max = 0
 	add_child(_canvas_mod)
 
 	# Player point light — visible at night, radius driven by gear/skill
@@ -373,6 +389,18 @@ func _ready() -> void:
 
 	# Brief weapon animation when a skill fires
 	CombatSystem.skill_used.connect(_on_skill_used)
+
+	# Drunk screen overlay (CanvasLayer above everything — fades as you sober up)
+	_drunk_layer = CanvasLayer.new()
+	_drunk_layer.layer = 25
+	add_child(_drunk_layer)
+	_drunk_overlay = ColorRect.new()
+	_drunk_overlay.color = Color(0.05, 0.55, 0.1, 0.0)
+	_drunk_layer.add_child(_drunk_overlay)  # must be in tree before setting anchors
+	_drunk_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_drunk_overlay.visible = false
+	Network.on_status_applied.connect(_on_status_applied_fx)
+	Network.on_status_removed.connect(_on_status_removed_fx)
 
 
 func load_map(map_id: int) -> void:
@@ -850,6 +878,19 @@ func _process(delta: float) -> void:
 				_spell_effects.remove_at(i)
 		queue_redraw()
 
+	# Drunk camera tilt + green overlay — fades as sobriety returns
+	if _drunk_remaining > 0.0:
+		_drunk_remaining -= delta
+		_drunk_time += delta
+		var frac: float = clampf(_drunk_remaining / maxf(_drunk_duration, 0.001), 0.0, 1.0)
+		var pulse: float = (sin(_drunk_time * 1.5) * 0.5 + 0.5) * 0.12 * frac
+		_drunk_overlay.color.a = pulse
+		_camera.rotation = sin(_drunk_time * 0.7) * 0.05 * frac
+		if _drunk_remaining <= 0.0:
+			_drunk_remaining = 0.0
+			_drunk_overlay.visible = false
+			_camera.rotation = 0.0
+
 	_camera.position = _cam_pixel
 	queue_redraw()
 
@@ -1081,7 +1122,41 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-		return   # Normal left-click — not consumed here
+		# Left-click on or near an NPC/player selects it as the keyboard target
+		var lc_best_id := 0
+		var lc_best_dist := 2  # within 2 tiles of click counts as "on" the target
+		for char_id in _chars:
+			if char_id == _player_idx:
+				continue
+			var c: CharData = _chars[char_id]
+			if not c.active:
+				continue
+			var d := maxi(abs(c.tile_pos.x - tile.x), abs(c.tile_pos.y - tile.y))
+			if d <= lc_best_dist:
+				lc_best_dist = d
+				lc_best_id = char_id
+		for npc_id in _map_npcs:
+			var c: CharData = _map_npcs[npc_id]
+			if not c.active:
+				continue
+			var d := maxi(abs(c.tile_pos.x - tile.x), abs(c.tile_pos.y - tile.y))
+			if d <= lc_best_dist:
+				lc_best_dist = d
+				lc_best_id = npc_id
+		if _dummy_char != null and _dummy_char.active:
+			var d := maxi(abs(_dummy_tile.x - tile.x), abs(_dummy_tile.y - tile.y))
+			if d <= lc_best_dist:
+				lc_best_id = -1
+		if lc_best_id != 0:
+			_kb_target_id = lc_best_id
+			queue_redraw()
+			get_viewport().set_input_as_handled()
+			return
+		# Deselect target if clicking empty ground
+		if _kb_target_id != 0:
+			_kb_target_id = 0
+			queue_redraw()
+		return
 
 	# --- Right-click handling ---
 	if mb.button_index != MOUSE_BUTTON_RIGHT:
@@ -2384,6 +2459,37 @@ func _on_net_remove_char(char_id: int) -> void:
 		_kb_target_id = 0
 		queue_redraw()
 	remove_char(char_id)
+
+
+## Context menu — social player actions
+func _on_context_duel(char_id: int) -> void:
+	Network.send_duel_request(char_id)
+
+func _on_context_carry(char_id: int) -> void:
+	Network.send_carry_request(char_id)
+
+func _on_context_pickpocket(char_id: int) -> void:
+	Network.send_pickpocket(char_id)
+
+func _on_context_marry(char_id: int) -> void:
+	Network.send_marry_propose(char_id)
+
+
+## Drunk status effect visual (FXDrunk = 5)
+func _on_status_applied_fx(char_id: int, status_id: int, duration_ms: int) -> void:
+	if char_id != Network.local_char_id or status_id != _FX_DRUNK:
+		return
+	_drunk_duration = float(duration_ms) / 1000.0
+	_drunk_remaining = _drunk_duration
+	_drunk_time = 0.0
+	_drunk_overlay.visible = true
+
+func _on_status_removed_fx(char_id: int, status_id: int) -> void:
+	if char_id != Network.local_char_id or status_id != _FX_DRUNK:
+		return
+	_drunk_remaining = 0.0
+	_drunk_overlay.visible = false
+	_camera.rotation = 0.0
 
 
 ## Auto-target the aggressor when an NPC enters combat with us.
