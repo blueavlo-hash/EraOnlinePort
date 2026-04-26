@@ -1,6 +1,11 @@
 [
     {
         "date": "APRIL 2026",
+        "title": "v0.5.21-alpha — Bug Fixes: HUD, Combat Lock, Targeting & Weapon Range",
+        "body": "HUD no longer disappears on login. Left-click now selects your target. Combat lock is active when an NPC aggros you — fight or flee, you can't just walk away. Weapon range is now accurate: bows reach 5 tiles, staves 4, wands 3, swords/axes 1 (some rares 2). Tester NPC and Bounty Boards added to the starting map."
+    },
+    {
+        "date": "APRIL 2026",
         "title": "v0.5.20-alpha — Right-Click Social, Enchanted Drops & Drunk Effects",
         "body": "Right-click any player for quick social actions: Duel, Carry, Pickpocket, and Propose. Signs now require Chalk (buy from Mira the Merchant on the starting map). Bounties can only be posted at a Bounty Board. NPCs now drop rare pre-enchanted weapons and armor — uncommon through legendary. Drunk now tilts your camera and pulses a green overlay that fades as you sober up. Stumble chance raised to 40%. Drunk also reduces attack damage 15-20%."
     },
