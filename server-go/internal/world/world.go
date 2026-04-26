@@ -131,6 +131,12 @@ type World struct {
 	// playerCount is updated atomically so the HTTP API can read it safely.
 	playerCount atomic.Int32
 
+	// Social / sandbox systems.
+	duels            map[int32]*DuelState  // challengerID → active duel
+	pendingDuels     map[int32]int32       // challengerID → targetID
+	signs            map[string]*WorldSign // "mapid:x:y" → sign
+	pendingMarriages map[int32]int32       // proposerID → targetID
+
 	// Boss spawn state: mapID → seconds until next spawn / current instance ID.
 	bossTimers    map[int]float64
 	bossInstances map[int]int32 // 0 = not spawned
@@ -173,8 +179,12 @@ func New(cfg Config, database *db.DB, gd *gamedata.GameData, log *slog.Logger) *
 		nextNPCID:      npcInstanceBase,
 		nextPlayerID:  1,
 		groundItems:   make(map[int16]*GroundItem),
-		pendingTrades: make(map[int32]int32),
-		gameMinutes:   480, // start at 8:00 AM so players don't spawn into darkness
+		pendingTrades:    make(map[int32]int32),
+		duels:            make(map[int32]*DuelState),
+		pendingDuels:     make(map[int32]int32),
+		signs:            make(map[string]*WorldSign),
+		pendingMarriages: make(map[int32]int32),
+		gameMinutes:      480, // start at 8:00 AM so players don't spawn into darkness
 		bossTimers:    make(map[int]float64),
 		bossInstances: make(map[int]int32),
 		tourneyScores: make(map[int32]tourneyScore),
@@ -258,6 +268,8 @@ func (w *World) handleMsg(msg ClientMsg) {
 		w.handleMove(p, msg.Payload)
 	case proto.MsgCAttack:
 		w.handleAttack(p, msg.Payload)
+	case proto.MsgCFlee:
+		w.handleFlee(p)
 	case proto.MsgCChat:
 		w.handleChat(p, msg.Payload)
 	case proto.MsgCPickup:
@@ -323,6 +335,33 @@ func (w *World) handleMsg(msg ClientMsg) {
 		w.sendTo(p, proto.MsgSPong, msg.Payload)
 	case proto.MsgCPenance:
 		w.handlePenance(p, msg.Payload)
+	// Social / sandbox
+	case proto.MsgCDuelRequest:
+		w.handleDuelRequest(p, msg.Payload)
+	case proto.MsgCDuelRespond:
+		w.handleDuelRespond(p, msg.Payload)
+	case proto.MsgCDuelBet:
+		w.handleDuelBet(p, msg.Payload)
+	case proto.MsgCCarryRequest:
+		w.handleCarryRequest(p, msg.Payload)
+	case proto.MsgCThrow:
+		w.handleThrow(p)
+	case proto.MsgCDropCarried:
+		w.handleDropCarried(p)
+	case proto.MsgCBountyPost:
+		w.handleBountyPost(p, msg.Payload)
+	case proto.MsgCBountyList:
+		w.handleBountyList(p)
+	case proto.MsgCPickpocket:
+		w.handlePickpocket(p, msg.Payload)
+	case proto.MsgCPlaceSign:
+		w.handlePlaceSign(p, msg.Payload)
+	case proto.MsgCReadSign:
+		w.handleReadSign(p, msg.Payload)
+	case proto.MsgCMarryPropose:
+		w.handleMarryPropose(p, msg.Payload)
+	case proto.MsgCMarryRespond:
+		w.handleMarryRespond(p, msg.Payload)
 	}
 }
 
@@ -443,6 +482,12 @@ func (w *World) handleJoin(connID uint64, info *JoinInfo) {
 	// Send quest indicators for NPCs on this map.
 	w.sendQuestIndicators(p)
 
+	// Send karma state.
+	w.sendKarmaUpdate(p)
+
+	// Send sign positions on this map.
+	w.sendSignsForMap(p)
+
 	// Daily login streak.
 	w.checkDailyLogin(p)
 }
@@ -459,6 +504,13 @@ func (w *World) handleLeave(connID uint64) {
 	}
 
 	w.log.Info("player left world", "char", p.CharName)
+
+	// Clean up social state.
+	w.cancelDuel(p)
+	w.releaseCarry(p)
+	// Remove any pending challenge or proposal from this player.
+	delete(w.pendingDuels, p.InstanceID)
+	delete(w.pendingMarriages, p.InstanceID)
 
 	// Persist.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -495,17 +547,21 @@ func (w *World) tick(timeIncPerTick float64, combatTicksPerAttack int) {
 		w.tickNPC(npc, combatTicksPerAttack)
 	}
 
-	// Player vitals, regen, combat cooldown, and poison.
+	// Player vitals, regen, combat cooldown, status effects, and poison.
 	w.regenTicks++
 	runRegen := w.regenTicks%20 == 0 // Gap 9: regen fires every 20 ticks (5 seconds)
+	deltaSec := float64(w.cfg.TickRateMS) / 1000.0
 	for _, p := range w.players {
-		// Decrement combat cooldown and clear InCombat when it reaches 0.
+		// Decrement combat cooldown; notify player when swing is ready.
 		if p.CombatCooldown > 0 {
 			p.CombatCooldown--
 			if p.CombatCooldown == 0 {
 				p.InCombat = false
+				w.sendTo(p, proto.MsgSSwingReady, nil)
+				w.sendCombatState(p)
 			}
 		}
+		w.tickStatusEffects(p, deltaSec)
 		w.tickVitals(p)
 		if runRegen {
 			w.tickPlayerRegen(p)
@@ -535,10 +591,12 @@ func (w *World) tick(timeIncPerTick float64, combatTicksPerAttack int) {
 	}
 
 	// Addiction loop timed systems.
-	deltaSec := float64(w.cfg.TickRateMS) / 1000.0
 	w.tickBosses(deltaSec)
 	w.tickWorldEvent(deltaSec)
 	w.tickTourney(deltaSec)
+
+	// Social systems.
+	w.tickDuels(deltaSec)
 }
 
 // tickNPC runs one AI step for an NPC.

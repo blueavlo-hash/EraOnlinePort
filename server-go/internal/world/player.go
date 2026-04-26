@@ -64,8 +64,13 @@ type Player struct {
 
 	// Combat.
 	InCombat       bool
-	CombatCooldown int // ticks remaining until next attack
+	CombatCooldown int   // ticks remaining until next attack
 	Target         int32 // 0 = no target
+
+	// Active status effects (bleed, stun, root, etc.).
+	StatusEffects []*StatusEffect
+	// BleedSourceID is the InstanceID of the player who applied bleed (for kill credit).
+	BleedSourceID int32
 
 	// Vitals (float for sub-tick decay).
 	Hunger float64
@@ -103,6 +108,16 @@ type Player struct {
 
 	// Bounty (gold on this player's head).
 	Bounty int
+
+	// Social / sandbox systems.
+	Karma      int   // -1000..+1000; <-200 = Chaotic, >200 = Lawful
+	MarriedTo  string // CharName of spouse; "" = single
+	CarryingID int32  // InstanceID of player being carried (0 = none)
+	CarriedByID int32 // InstanceID of carrier (0 = none)
+	InDuel      bool
+	DuelTarget  int32  // InstanceID of duel opponent
+	Disguised   bool   // true when wearing a disguise helm
+	Spectating  bool   // true when on an arena spectator tile
 
 	// Login streak (loaded from DB on join, not persisted on Player directly — see handleJoin).
 	LoginStreak    int
@@ -186,6 +201,8 @@ func (p *Player) FromCharData(cd *db.CharData, connID uint64, instanceID int32, 
 	if p.ActiveTitle == "" {
 		p.ActiveTitle = "Novice"
 	}
+	p.Karma = cd.Karma
+	p.MarriedTo = cd.MarriedTo
 }
 
 // ToCharData writes the in-world player state back to a db.CharData for saving.
@@ -227,11 +244,23 @@ func (p *Player) ToCharData() *db.CharData {
 		AchievementIDs: p.AchievementIDs,
 		Bounty:         p.Bounty,
 		ActiveTitle:    p.ActiveTitle,
+		Karma:          p.Karma,
+		MarriedTo:      p.MarriedTo,
 	}
 }
 
 // BuildSetChar builds the S_SET_CHAR packet payload for this player.
+// When disguised, name is sent as "???" to other players; self always sees real name.
 func (p *Player) BuildSetChar() []byte {
+	return p.buildSetCharNamed(p.CharName)
+}
+
+// BuildSetCharDisguised builds S_SET_CHAR with the name hidden as "???".
+func (p *Player) BuildSetCharDisguised() []byte {
+	return p.buildSetCharNamed("???")
+}
+
+func (p *Player) buildSetCharNamed(name string) []byte {
 	w := proto.NewWriter(64)
 	w.WriteI32(p.InstanceID)
 	w.WriteI16(int16(p.BodyIndex))
@@ -243,7 +272,7 @@ func (p *Player) BuildSetChar() []byte {
 	w.WriteU8(p.Heading)
 	w.WriteI16(int16(p.HP))
 	w.WriteI16(int16(p.MaxHP))
-	w.WriteStr(p.CharName)
+	w.WriteStr(name)
 	w.WriteStr(p.ActiveTitle)
 	return w.Bytes()
 }

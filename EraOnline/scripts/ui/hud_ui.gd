@@ -81,8 +81,39 @@ var _slot_cd_lbls:   Array[Label]     = []
 ## Aim mode label (shown above hotbar during spell targeting)
 var _aim_label: Label = null
 
+## Combat bar (shown when in combat)
+var _combat_bar:      Panel     = null
+var _combat_tgt_lbl:  Label     = null
+var _swing_bg:        ColorRect = null
+var _swing_fill:      ColorRect = null
+var _swing_lbl:       Label     = null
+var _status_icons:    Array[ColorRect] = []  # [bleed, stun, root, mdrain]
+var _in_combat:       bool  = false
+var _swing_cd_rem_ms: float = 0.0
+var _swing_cd_tot_ms: float = 4000.0  # default, updated from server
+
+const C_SWING_FILL  := Color(0.88, 0.55, 0.10, 1.00)
+const C_SWING_RDY   := Color(0.20, 0.82, 0.22, 1.00)
+const C_SWING_BG    := Color(0.10, 0.07, 0.02, 1.00)
+const C_COMBAT_LBL  := Color(0.95, 0.30, 0.20, 1.00)
+
+const FX_COLORS := [
+	Color(0.85, 0.15, 0.10, 1.00),  # bleed  — red
+	Color(0.90, 0.80, 0.10, 1.00),  # stun   — yellow
+	Color(0.20, 0.55, 0.90, 1.00),  # root   — blue
+	Color(0.55, 0.10, 0.85, 1.00),  # mdrain — purple
+	Color(0.90, 0.62, 0.10, 1.00),  # drunk  — amber
+]
+const FX_NAMES := ["BLD", "STN", "ROOT", "MP", "DRK"]
+
 ## Floating damage numbers
 var _dmg_labels: Array[Node] = []
+
+## Karma display
+var _karma_label: Label = null
+
+## Carry indicator (shown when carrying or being carried)
+var _carry_label: Label = null
 
 ## Tooltip
 var _tooltip: Panel        = null
@@ -98,12 +129,20 @@ const TOOLTIP_DELAY := 0.55
 func _ready() -> void:
 	layer = 10
 	_build_hud()
+	_build_combat_bar()
 	PlayerState.stats_changed.connect(_refresh_bars)
 	PlayerState.vitals_changed.connect(_refresh_vitals)
 	PlayerState.unified_hotbar_changed.connect(_refresh_all_slots)
 	PlayerState.spellbook_changed.connect(_refresh_all_slots)
 	CombatSystem.damage_dealt.connect(_on_damage_dealt)
 	CombatSystem.target_died.connect(_on_target_died)
+	Network.on_combat_state.connect(_on_combat_state)
+	Network.on_swing_ready.connect(_on_swing_ready)
+	Network.on_flee_result.connect(_on_flee_result)
+	Network.on_status_applied.connect(_on_status_applied_hud)
+	Network.on_status_removed.connect(_on_status_removed_hud)
+	Network.on_karma_update.connect(_on_karma_update)
+	Network.on_carry_state.connect(_on_carry_state)
 	_refresh_bars()
 	_refresh_vitals()
 	_refresh_all_slots()
@@ -114,6 +153,7 @@ func _process(delta: float) -> void:
 	_update_cooldowns()
 	_tick_damage_labels(delta)
 	_tick_tooltip(delta)
+	_tick_swing_bar(delta)
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +269,29 @@ func _build_hud() -> void:
 	_tooltip.visible = false
 	_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_tooltip)
+
+	# Karma label — top-right corner
+	_karma_label = Label.new()
+	_karma_label.text = "Karma: 0  [Neutral]"
+	_karma_label.add_theme_font_size_override("font_size", 10)
+	_karma_label.add_theme_color_override("font_color", C_TEXT_DIM)
+	_karma_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_karma_label.size     = Vector2(200, 16)
+	_karma_label.position = Vector2(VW - 204, 4)
+	_karma_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_karma_label)
+
+	# Carry indicator — above HUD, centred
+	_carry_label = Label.new()
+	_carry_label.text = ""
+	_carry_label.visible = false
+	_carry_label.add_theme_font_size_override("font_size", 13)
+	_carry_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.20, 1.0))
+	_carry_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_carry_label.size     = Vector2(400, 20)
+	_carry_label.position = Vector2(VW / 2.0 - 200, VH - HUD_H - 24)
+	_carry_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_carry_label)
 
 
 func _build_hotbar(parent: Control, x0: int, y0: int) -> void:
@@ -480,6 +543,144 @@ func hide_aim_mode() -> void:
 
 
 # ---------------------------------------------------------------------------
+# Combat bar (above HUD, visible only in combat)
+# ---------------------------------------------------------------------------
+
+const CB_W   := 420
+const CB_H   := 46
+const SW_W   := 180
+const SW_H   := 14
+
+func _build_combat_bar() -> void:
+	var cx := int((VW - CB_W) / 2.0)
+	var cy := int(VH - HUD_H - CB_H - 4)
+
+	_combat_bar = Panel.new()
+	_combat_bar.size     = Vector2(CB_W, CB_H)
+	_combat_bar.position = Vector2(cx, cy)
+	_combat_bar.add_theme_stylebox_override("panel", _box(Color(0.06, 0.02, 0.02, 0.93), Color(0.70, 0.15, 0.10, 1.0), 2, 4))
+	_combat_bar.visible  = false
+	add_child(_combat_bar)
+
+	# "IN COMBAT" + target name
+	_combat_tgt_lbl = Label.new()
+	_combat_tgt_lbl.add_theme_font_size_override("font_size", 11)
+	_combat_tgt_lbl.add_theme_color_override("font_color", C_COMBAT_LBL)
+	_combat_tgt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_combat_tgt_lbl.size     = Vector2(CB_W - 8, 16)
+	_combat_tgt_lbl.position = Vector2(4, 4)
+	_combat_bar.add_child(_combat_tgt_lbl)
+
+	# Swing timer bar
+	var sw_x := 8
+	var sw_y := 24
+	_swing_bg = ColorRect.new(); _swing_bg.color = C_SWING_BG
+	_swing_bg.size = Vector2(SW_W, SW_H); _swing_bg.position = Vector2(sw_x, sw_y)
+	_combat_bar.add_child(_swing_bg)
+	_swing_fill = ColorRect.new(); _swing_fill.color = C_SWING_FILL
+	_swing_fill.size = Vector2(SW_W, SW_H); _swing_fill.position = Vector2(sw_x, sw_y)
+	_combat_bar.add_child(_swing_fill)
+	_swing_lbl = Label.new(); _swing_lbl.text = "SWING"
+	_swing_lbl.add_theme_font_size_override("font_size", 9)
+	_swing_lbl.add_theme_color_override("font_color", C_TEXT)
+	_swing_lbl.size = Vector2(SW_W, SW_H); _swing_lbl.position = Vector2(sw_x, sw_y)
+	_swing_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_combat_bar.add_child(_swing_lbl)
+
+	# Status effect icons (right of swing bar)
+	var ix := sw_x + SW_W + 8
+	for i in 5:
+		var icon := ColorRect.new()
+		icon.size     = Vector2(32, SW_H)
+		icon.position = Vector2(ix + i * 36, sw_y)
+		icon.color    = FX_COLORS[i]
+		icon.visible  = false
+		_combat_bar.add_child(icon)
+		var lbl := Label.new(); lbl.text = FX_NAMES[i]
+		lbl.add_theme_font_size_override("font_size", 8)
+		lbl.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		lbl.size = Vector2(32, SW_H); lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon.add_child(lbl)
+		_status_icons.append(icon)
+
+	# Flee hint (right edge)
+	var fl := Label.new(); fl.text = "[F] Flee"
+	fl.add_theme_font_size_override("font_size", 10)
+	fl.add_theme_color_override("font_color", Color(0.80, 0.65, 0.30, 1.0))
+	fl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	fl.size     = Vector2(CB_W - 8, 16)
+	fl.position = Vector2(4, 4)
+	_combat_bar.add_child(fl)
+
+
+func _tick_swing_bar(delta: float) -> void:
+	if not _in_combat or _swing_cd_tot_ms <= 0:
+		return
+	if _swing_cd_rem_ms > 0:
+		_swing_cd_rem_ms = maxf(0.0, _swing_cd_rem_ms - delta * 1000.0)
+	var frac := 1.0 - clampf(_swing_cd_rem_ms / _swing_cd_tot_ms, 0.0, 1.0)
+	_swing_fill.size.x = SW_W * frac
+	_swing_fill.color  = C_SWING_RDY if _swing_cd_rem_ms <= 0 else C_SWING_FILL
+	_swing_lbl.text    = "READY" if _swing_cd_rem_ms <= 0 else "SWING  %.1fs" % (_swing_cd_rem_ms / 1000.0)
+
+
+func _on_combat_state(in_combat: bool, _target_id: int, swing_cd_ms: int) -> void:
+	_in_combat = in_combat
+	_combat_bar.visible = in_combat
+	if in_combat:
+		_swing_cd_rem_ms = float(swing_cd_ms)
+		if swing_cd_ms > 0:
+			_swing_cd_tot_ms = float(swing_cd_ms)
+		_combat_tgt_lbl.text = "-- IN COMBAT --"
+	else:
+		_swing_cd_rem_ms = 0.0
+		_clear_all_status_icons()
+
+
+func _on_swing_ready() -> void:
+	_swing_cd_rem_ms = 0.0
+	_swing_fill.size.x = SW_W
+	_swing_fill.color  = C_SWING_RDY
+	_swing_lbl.text    = "READY"
+
+
+func _on_flee_result(success: bool) -> void:
+	if success:
+		_in_combat = false
+		_combat_bar.visible = false
+		_clear_all_status_icons()
+	else:
+		# Flash combat label to indicate flee failed
+		_combat_tgt_lbl.text = "-- FLEE FAILED --"
+		get_tree().create_timer(1.2).timeout.connect(
+			func() -> void:
+				if _in_combat:
+					_combat_tgt_lbl.text = "-- IN COMBAT --")
+
+
+func _on_status_applied_hud(char_id: int, status_id: int, _duration_ms: int) -> void:
+	if char_id != Network.local_char_id:
+		return
+	var idx := status_id - 1  # FX_BLEED=1 → idx 0, etc.
+	if idx >= 0 and idx < _status_icons.size():
+		_status_icons[idx].visible = true
+
+
+func _on_status_removed_hud(char_id: int, status_id: int) -> void:
+	if char_id != Network.local_char_id:
+		return
+	var idx := status_id - 1
+	if idx >= 0 and idx < _status_icons.size():
+		_status_icons[idx].visible = false
+
+
+func _clear_all_status_icons() -> void:
+	for icon in _status_icons:
+		icon.visible = false
+
+
+# ---------------------------------------------------------------------------
 # Stat bar refresh
 # ---------------------------------------------------------------------------
 
@@ -689,3 +890,29 @@ func _box(bg: Color, border: Color, bw: int, radius: int = 3) -> StyleBoxFlat:
 	s.corner_radius_top_left = radius; s.corner_radius_top_right = radius
 	s.corner_radius_bottom_left = radius; s.corner_radius_bottom_right = radius
 	return s
+
+
+func _on_karma_update(karma: int, alignment: int) -> void:
+	if _karma_label == null:
+		return
+	var align_str := ["Neutral", "Lawful", "Chaotic"][alignment]
+	var align_color := [C_TEXT_DIM, Color(0.4, 0.8, 0.4, 1.0), Color(0.85, 0.25, 0.15, 1.0)][alignment]
+	_karma_label.text = "Karma: %d  [%s]" % [karma, align_str]
+	_karma_label.add_theme_color_override("font_color", align_color)
+
+
+func _on_carry_state(carrier_id: int, carried_id: int) -> void:
+	if _carry_label == null:
+		return
+	var local_id := Network.local_char_id
+	if carrier_id == 0 and carried_id == 0:
+		_carry_label.visible = false
+		return
+	if carrier_id == local_id:
+		_carry_label.text = "Carrying a player — use /throw or /drop"
+		_carry_label.visible = true
+	elif carried_id == local_id:
+		_carry_label.text = "Being carried! Type /drop to break free"
+		_carry_label.visible = true
+	else:
+		_carry_label.visible = false

@@ -151,6 +151,127 @@ func recalcCombatStats(classID, level, weaponMinHit, weaponMaxHit, weaponDef, sh
 	return
 }
 
+// ---------------------------------------------------------------------------
+// Status effects
+// ---------------------------------------------------------------------------
+
+// Status effect IDs (match MsgSStatusApplied / MsgSStatusRemoved).
+const (
+	FXBleed  = 1 // DoT: 3 ticks over 6s
+	FXStun   = 2 // next swing blocked
+	FXRoot   = 3 // movement blocked for duration
+	FXMDrain = 4 // mana drain (instant, brief icon)
+	FXDrunk  = 5 // movement randomisation + chat garble
+)
+
+const FleeBaseChance = 0.35
+
+// StatusEffect is an active effect on a player.
+type StatusEffect struct {
+	Type       int     // FXBleed / FXStun / FXRoot / FXMDrain
+	Remaining  float64 // seconds remaining
+	TickTimer  float64 // bleed: seconds until next damage tick
+	DmgPerTick int     // bleed: damage per tick
+}
+
+// skillEffectMap maps skill_id (from C_ATTACK u8) to its effect string.
+var skillEffectMap = map[uint8]string{
+	1: "bleed",      // Rend
+	2: "stun",       // Stun Strike
+	3: "root",       // Cripple
+	4: "mana_drain", // Mana Sap
+	5: "execute",    // Execute
+	6: "triple",     // Triple Strike
+	7: "five_hit",   // Flurry
+	8: "cleave",     // Cleave
+}
+
+// resolveSkillEffect applies a named skill modifier on top of an attack.
+// Returns (effectID, effectDurSec, bonusDmg, manaDrain).
+func resolveSkillEffect(effect string, dmg int, attacker, target *Player) (effectID int, effectDur float64, bonusDmg int, manaDrain int) {
+	switch effect {
+	case "bleed":
+		return FXBleed, 6.0, 0, 0
+	case "stun":
+		return FXStun, 0.0, 0, 0
+	case "root":
+		return FXRoot, 2.0, 0, 0
+	case "mana_drain":
+		drain := imin(attacker.MaxMP/5, target.MP)
+		if drain > 0 {
+			return FXMDrain, 1.5, 0, drain
+		}
+		return 0, 0, 0, 0
+	case "execute":
+		if target.MaxHP > 0 && float64(target.HP)/float64(target.MaxHP) < 0.30 {
+			return 0, 0, dmg, 0 // double damage below 30% HP
+		}
+	case "triple":
+		return 0, 0, dmg * 2, 0 // total ×3 via bonus
+	case "five_hit":
+		return 0, 0, dmg * 4, 0 // total ×5 via bonus
+	case "cleave":
+		return FXRoot, 0.5, 0, 0 // brief stagger
+	}
+	return 0, 0, 0, 0
+}
+
+// applyStatusEffect adds or refreshes a status effect on a player.
+func applyStatusEffect(p *Player, effectID int, duration float64, dmgPerTick int) {
+	for _, fx := range p.StatusEffects {
+		if fx.Type == effectID {
+			if duration > fx.Remaining {
+				fx.Remaining = duration
+			}
+			if effectID == FXBleed && dmgPerTick > 0 {
+				fx.DmgPerTick = dmgPerTick
+			}
+			return
+		}
+	}
+	fx := &StatusEffect{Type: effectID, Remaining: duration}
+	if effectID == FXBleed {
+		fx.TickTimer = 2.0
+		fx.DmgPerTick = dmgPerTick
+	}
+	p.StatusEffects = append(p.StatusEffects, fx)
+}
+
+// hasEffect returns whether a player has a specific effect active.
+func hasEffect(p *Player, effectID int) bool {
+	for _, fx := range p.StatusEffects {
+		if fx.Type == effectID && fx.Remaining > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// clearEffect removes one effect type from a player.
+func clearEffect(p *Player, effectID int) {
+	out := p.StatusEffects[:0]
+	for _, fx := range p.StatusEffects {
+		if fx.Type != effectID {
+			out = append(out, fx)
+		}
+	}
+	p.StatusEffects = out
+}
+
+// fleeChance returns the probability of a flee attempt succeeding.
+// 35% base + 0.5% per AGI - 2% per level diff (pursuer higher), clamped 10-80%.
+func fleeChance(fleeingLevel, fleeingAGI, pursuerLevel int) float64 {
+	base := FleeBaseChance + float64(fleeingAGI)*0.005
+	base -= float64(pursuerLevel-fleeingLevel) * 0.02
+	if base < 0.10 {
+		return 0.10
+	}
+	if base > 0.80 {
+		return 0.80
+	}
+	return base
+}
+
 func imax(a, b int) int {
 	if a > b {
 		return a

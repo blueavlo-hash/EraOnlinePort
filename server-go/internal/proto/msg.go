@@ -34,7 +34,8 @@ const (
 
 	// Client → Server (authenticated)
 	MsgCMove         uint16 = 0x0100 // direction:u8 (1=N 2=E 3=S 4=W)
-	MsgCAttack       uint16 = 0x0101 // target_id:i32
+	MsgCAttack       uint16 = 0x0101 // target_id:i32, skill_id:u8 (0=basic)
+	MsgCFlee         uint16 = 0x010B // (no payload) — attempt to break combat
 	MsgCPickup       uint16 = 0x0102 // ground_item_id:i16
 	MsgCDrop         uint16 = 0x0103 // slot:u8, amount:u16
 	MsgCEquip        uint16 = 0x0104 // slot:u8
@@ -62,6 +63,10 @@ const (
 	MsgSMapChange   uint16 = 0x020A // map_id:i32, x:i16, y:i16
 	MsgSPlaySound   uint16 = 0x020B // sound_num:u8
 	MsgSSetStats    uint16 = 0x020C // count:u16, count×(key:str, value:i32)
+	MsgSCombatState uint16 = 0x0220 // in_combat:u8, target_id:i32, swing_cd_ms:u16
+	MsgSSwingReady  uint16 = 0x0221 // (no payload) — swing cooldown expired
+	MsgSFleeResult  uint16 = 0x0222 // success:u8
+
 	MsgSPong        uint16 = 0x02FF // timestamp_ms:i64
 	MsgSKick        uint16 = 0x0F00 // reason:str
 	MsgSServerMsg   uint16 = 0x0F01 // message:str
@@ -139,6 +144,52 @@ const (
 	// Day/night
 	MsgSTimeOfDay uint16 = 0x0100 // u16 minutes (0-1439)
 
+	// Karma / alignment
+	MsgSKarmaUpdate uint16 = 0x0400 // i32 karma, u8 alignment (0=neutral,1=lawful,2=chaotic)
+
+	// Duel system
+	MsgCDuelRequest   uint16 = 0x0500 // i32 target_id
+	MsgSDuelChallenge uint16 = 0x0501 // i32 challenger_id, str challenger_name
+	MsgCDuelRespond   uint16 = 0x0502 // u8 accept (1=yes)
+	MsgSDuelStart     uint16 = 0x0503 // i32 opponent_id, str opponent_name
+	MsgSDuelEnd       uint16 = 0x0504 // u8 result (0=lost,1=won,2=cancelled)
+	MsgCDuelBet       uint16 = 0x0505 // i32 challenger_id, u8 side (0=challenger,1=target), i32 gold
+	MsgSDuelBetAck    uint16 = 0x0506 // u8 success, str reason
+
+	// Carry / throw
+	MsgCCarryRequest uint16 = 0x0510 // i32 target_id
+	MsgSCarryState   uint16 = 0x0511 // i32 carrier_id, i32 carried_id (both 0 = released)
+	MsgCThrow        uint16 = 0x0512 // (no payload) — throw carried player
+	MsgCDropCarried  uint16 = 0x0513 // (no payload) — escape from carrier
+
+	// Bounty board
+	MsgCBountyPost uint16 = 0x0520 // str target_name, i32 gold
+	MsgCBountyList uint16 = 0x0521 // (no payload)
+	MsgSBountyList uint16 = 0x0522 // u8 count, count×(str name, i32 bounty)
+
+	// Pickpocket
+	MsgCPickpocket       uint16 = 0x0530 // i32 target_id
+	MsgSPickpocketResult uint16 = 0x0531 // u8 success, i32 gold_stolen
+
+	// Disguise
+	MsgSDisguiseState uint16 = 0x0540 // u8 disguised (self-only)
+
+	// Signs / graffiti
+	MsgCPlaceSign  uint16 = 0x0550 // str text (placed at player tile)
+	MsgCReadSign   uint16 = 0x0551 // i16 x, i16 y
+	MsgSSignContent uint16 = 0x0552 // str text, str placed_by
+	MsgSSignAdd    uint16 = 0x0553 // i16 x, i16 y (sign exists here)
+	MsgSSignRemove uint16 = 0x0554 // i16 x, i16 y
+
+	// Marriage
+	MsgCMarryPropose uint16 = 0x0570 // i32 target_id
+	MsgSMarryRequest uint16 = 0x0571 // i32 from_id, str from_name
+	MsgCMarryRespond uint16 = 0x0572 // u8 accept (1=yes)
+	MsgSMarryResult  uint16 = 0x0573 // u8 success (1=married,2=divorced), str spouse_name
+
+	// Arena / spectating
+	MsgSSpectateState uint16 = 0x0580 // u8 spectating (1=on, 0=off)
+
 	// Faction
 	MsgCPenance    uint16 = 0x0110 // str faction_name
 	MsgSRepRefused uint16 = 0x0111 // str faction_name
@@ -208,7 +259,21 @@ var RateLimits = map[uint16]RateLimit{
 	MsgCUseSkill:     {2, 4},
 	MsgCBuySpell:     {1, 2},
 	MsgCLearnAbility: {1, 2},
+	MsgCFlee:         {1, 2},
 	MsgCPing:         {1, 2},
+	MsgCDuelRequest:  {1, 2},
+	MsgCDuelRespond:  {1, 2},
+	MsgCDuelBet:      {2, 4},
+	MsgCCarryRequest: {2, 4},
+	MsgCThrow:        {2, 4},
+	MsgCDropCarried:  {4, 8},
+	MsgCBountyPost:   {1, 2},
+	MsgCBountyList:   {2, 4},
+	MsgCPickpocket:   {1, 2},
+	MsgCPlaceSign:    {1, 2},
+	MsgCReadSign:     {4, 8},
+	MsgCMarryPropose: {1, 2},
+	MsgCMarryRespond: {1, 2},
 }
 
 // ChatType values for MsgSChat.

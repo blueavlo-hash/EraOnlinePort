@@ -16,6 +16,11 @@ import (
 // ---------------------------------------------------------------------------
 
 func (w *World) handleMove(p *Player, payload []byte) {
+	// Cannot move while being carried.
+	if p.CarriedByID != 0 {
+		return
+	}
+
 	r := proto.NewReader(payload)
 	dir, err := r.ReadU8()
 	if err != nil {
@@ -23,6 +28,16 @@ func (w *World) handleMove(p *Player, payload []byte) {
 	}
 	if dir < 1 || dir > 4 {
 		return
+	}
+
+	// Root blocks movement.
+	if hasEffect(p, FXRoot) {
+		return
+	}
+
+	// Drunk: 25% chance to stumble in a random direction instead.
+	if hasEffect(p, FXDrunk) && rand.Float64() < 0.25 {
+		dir = uint8(1 + rand.Intn(4))
 	}
 
 	dx, dy := wanderDelta(dir)
@@ -68,6 +83,16 @@ func (w *World) handleMove(p *Player, payload []byte) {
 
 	w.broadcastMapAndSelf(p.MapID, proto.MsgSMoveChar,
 		buildMoveChar(p.InstanceID, p.X, p.Y, p.Heading))
+
+	// If carrying someone, drag them along.
+	if p.CarryingID != 0 {
+		if carried, ok := w.players[p.CarryingID]; ok {
+			carried.X = p.X
+			carried.Y = p.Y
+			w.broadcastMapAndSelf(p.MapID, proto.MsgSMoveChar,
+				buildMoveChar(carried.InstanceID, carried.X, carried.Y, carried.Heading))
+		}
+	}
 
 	// Track map visit for explorer achievements.
 	w.trackMapVisit(p, p.MapID)
@@ -139,6 +164,14 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 	if err != nil {
 		return
 	}
+	skillID, _ := r.ReadU8() // 0 = basic attack; ignore error (old clients send no skill byte)
+
+	// Stun blocks the next swing.
+	if hasEffect(p, FXStun) {
+		clearEffect(p, FXStun)
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You are stunned!"))
+		return
+	}
 
 	if p.CombatCooldown > 0 {
 		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You are not ready to attack yet."))
@@ -163,6 +196,8 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 		}
 	}
 
+	effect := skillEffectMap[skillID] // "" for basic or unknown skill_id
+
 	// NPC target.
 	if npc, ok := w.npcs[targetID]; ok {
 		if npc.MapID != p.MapID || npc.Dead {
@@ -175,6 +210,12 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 			return
 		}
 		dmg, evaded := resolveAttack(minDmg, maxDmg, 0, p.Level, npc.Def.Defense, 1)
+		if !evaded && dmg > 0 && effect != "" {
+			// NPC status effects: only bleed/root/stun are meaningful on NPCs.
+			// We apply damage bonus effects silently (no status broadcast for NPCs).
+			_, _, bonusDmg, _ := resolveSkillEffect(effect, dmg, p, nil)
+			dmg += bonusDmg
+		}
 		w.broadcastMap(p.MapID, proto.MsgSDamage, buildDamage(targetID, int16(dmg), evaded), -1)
 
 		if !evaded {
@@ -183,17 +224,37 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 				w.npcDied(p, npc)
 			}
 		}
-		// Award weapon skill XP.
 		w.awardSkillXPForWeapon(p)
 		p.CombatCooldown = w.cfg.CombatTickMS / w.cfg.TickRateMS
 		p.InCombat = true
+		p.Target = targetID
+
+		// Notify client: entered combat with this target.
+		w.sendCombatState(p)
 
 	} else if target, ok := w.players[targetID]; ok {
-		// PvP — only on PK maps.
-		m := w.gameData.GetMap(p.MapID)
-		if m == nil || !m.PKZone {
+		// Spectating players cannot be attacked.
+		if target.Spectating {
 			return
 		}
+
+		// Duel: both players are flagged as duelling each other.
+		isDuel := p.InDuel && p.DuelTarget == targetID &&
+			target.InDuel && target.DuelTarget == p.InstanceID
+
+		if !isDuel {
+			// While in a duel you may only attack your opponent.
+			if p.InDuel {
+				w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You are in a duel!"))
+				return
+			}
+			// Normal PvP: PKZone only.
+			m := w.gameData.GetMap(p.MapID)
+			if m == nil || !m.PKZone {
+				return
+			}
+		}
+
 		dx := target.X - p.X
 		dy := target.Y - p.Y
 		if iabs(dx) > 2 || iabs(dy) > 2 {
@@ -202,50 +263,131 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 		}
 		targetDef := getObjDef(w, target.ShieldSlot) + getObjDef(w, target.ArmorSlot)
 		dmg, evaded := resolveAttack(minDmg, maxDmg, 0, p.Level, targetDef, target.Level)
+
+		if !evaded && dmg > 0 && effect != "" {
+			effectID, effectDur, bonusDmg, manaDrain := resolveSkillEffect(effect, dmg, p, target)
+			dmg += bonusDmg
+			if manaDrain > 0 {
+				target.MP = imax(0, target.MP-manaDrain)
+				p.MP = imin(p.MaxMP, p.MP+manaDrain)
+			}
+			if effectID != 0 {
+				bleedDmg := 0
+				if effectID == FXBleed {
+					bleedDmg = imax(1, dmg/4)
+					target.BleedSourceID = p.InstanceID
+				}
+				applyStatusEffect(target, effectID, effectDur, bleedDmg)
+				durMS := uint16(effectDur * 1000)
+				wr := proto.NewWriter(8)
+				wr.WriteI32(target.InstanceID)
+				wr.WriteU8(uint8(effectID))
+				wr.WriteU16(durMS)
+				w.broadcastMap(p.MapID, proto.MsgSStatusApplied, wr.Bytes(), -1)
+			}
+		}
+
 		w.broadcastMap(p.MapID, proto.MsgSDamage, buildDamage(targetID, int16(dmg), evaded), -1)
 
 		if !evaded {
-			target.HP -= dmg
-			if target.HP < 0 {
-				target.HP = 0
-			}
-			wr := proto.NewWriter(6)
-			wr.WriteI16(int16(target.HP))
-			wr.WriteI16(int16(target.MP))
-			wr.WriteI16(int16(target.Stamina))
-			w.sendTo(target, proto.MsgSHealth, wr.Bytes())
+			target.HP = imax(0, target.HP-dmg)
+			w.sendTo(target, proto.MsgSHealth, buildHealth(target.HP, target.MP, target.Stamina))
 
 			if target.HP == 0 {
-				// Bounty: killer collects the victim's bounty, victim gets a new bounty.
-				if target.Bounty > 0 {
-					p.Gold += target.Bounty
-					w.sendTo(p, proto.MsgSServerMsg,
-						buildServerMsg(fmt.Sprintf("You collected a bounty of %d gold!", target.Bounty)))
-					w.sendTo(p, proto.MsgSStats, p.BuildStats())
-					w.checkAchievements(p, "bounties_collected", 1)
-					target.Bounty = 0
-				}
-				// Add bounty to killer and broadcast.
-				p.Bounty += 200
-				{
-					wr := proto.NewWriter(16 + len(p.CharName))
-					wr.WriteI32(p.InstanceID)
-					wr.WriteStr(p.CharName)
-					wr.WriteI32(int32(p.Bounty))
-					w.broadcastMap(p.MapID, proto.MsgSBountyUpdate, wr.Bytes(), -1)
-				}
-				w.broadcastMap(p.MapID, proto.MsgSServerMsg,
-					buildServerMsg(fmt.Sprintf("WARNING: %s is now wanted! Bounty: %d gold.", p.CharName, p.Bounty)), -1)
+				if isDuel {
+					// Duel ends — no death, no karma loss.
+					w.resolveDuel(p.InstanceID)
+				} else {
+					// Real PvP kill.
+					if target.Bounty > 0 {
+						p.Gold += target.Bounty
+						w.sendTo(p, proto.MsgSServerMsg,
+							buildServerMsg(fmt.Sprintf("You collected a bounty of %d gold!", target.Bounty)))
+						w.sendTo(p, proto.MsgSStats, p.BuildStats())
+						w.checkAchievements(p, "bounties_collected", 1)
+						target.Bounty = 0
+					}
+					p.Bounty += 200
+					{
+						wr := proto.NewWriter(16 + len(p.CharName))
+						wr.WriteI32(p.InstanceID)
+						wr.WriteStr(p.CharName)
+						wr.WriteI32(int32(p.Bounty))
+						w.broadcastMap(p.MapID, proto.MsgSBountyUpdate, wr.Bytes(), -1)
+					}
+					w.broadcastMap(p.MapID, proto.MsgSServerMsg,
+						buildServerMsg(fmt.Sprintf("WARNING: %s is now wanted! Bounty: %d gold.", p.CharName, p.Bounty)), -1)
 
-				w.playerDied(target, p.CharName)
-				// Gap 19: track player kill for killer.
-				w.checkAchievements(p, "player_kills", 1)
-				// Gap 19: track death for victim.
-				w.checkAchievements(target, "deaths", 1)
+					// Karma penalty for killing a player.
+					w.updateKarma(p, KarmaPvPKillCost)
+
+					w.playerDied(target, p.CharName)
+					w.checkAchievements(p, "player_kills", 1)
+					w.checkAchievements(target, "deaths", 1)
+				}
 			}
 		}
 		p.CombatCooldown = w.cfg.CombatTickMS / w.cfg.TickRateMS
+		p.InCombat = true
+		p.Target = targetID
+
+		// Notify attacker: entered combat.
+		w.sendCombatState(p)
 	}
+}
+
+// handleFlee attempts to break the player out of combat.
+func (w *World) handleFlee(p *Player) {
+	if !p.InCombat {
+		return
+	}
+
+	// Determine pursuer level for flee penalty.
+	pursuerLevel := p.Level
+	if target, ok := w.players[p.Target]; ok {
+		pursuerLevel = target.Level
+	} else if npc, ok := w.npcs[p.Target]; ok {
+		// NPCData has no Level field — derive from ExpReward (= level*15).
+		pursuerLevel = imax(1, npc.Def.ExpReward/15)
+	}
+
+	// AGI from class/level stats.
+	_, _, _, _, _, _, agi, _ := recalcCombatStats(p.ClassID, p.Level, 0, 0, 0, 0, 0)
+	chance := fleeChance(p.Level, agi, pursuerLevel)
+	success := rand.Float64() < chance
+
+	wr := proto.NewWriter(1)
+	if success {
+		wr.WriteU8(1)
+	} else {
+		wr.WriteU8(0)
+	}
+	w.sendTo(p, proto.MsgSFleeResult, wr.Bytes())
+
+	if success {
+		p.InCombat = false
+		p.CombatCooldown = 0
+		p.Target = 0
+		// Send out-of-combat state.
+		w.sendCombatState(p)
+	}
+}
+
+// sendCombatState sends MsgSCombatState to a player.
+func (w *World) sendCombatState(p *Player) {
+	inCombat := uint8(0)
+	if p.InCombat {
+		inCombat = 1
+	}
+	cdMS := uint16(0)
+	if p.CombatCooldown > 0 {
+		cdMS = uint16(p.CombatCooldown * w.cfg.TickRateMS)
+	}
+	wr := proto.NewWriter(7)
+	wr.WriteU8(inCombat)
+	wr.WriteI32(p.Target)
+	wr.WriteU16(cdMS)
+	w.sendTo(p, proto.MsgSCombatState, wr.Bytes())
 }
 
 // awardSkillXPForWeapon awards XP to the appropriate weapon skill based on equipped weapon.
@@ -331,6 +473,8 @@ func (w *World) npcDied(killer *Player, npc *NPC) {
 	if xp == 0 {
 		xp = npc.Def.MinHP / 2 // fallback: half of min HP
 	}
+	// Marriage XP bonus (+5% when spouse is on same map).
+	xp += w.marryXPBonus(killer, xp)
 	killer.Exp += xp
 	{
 		wr := proto.NewWriter(4)
@@ -401,8 +545,79 @@ func (w *World) handleChat(p *Player, payload []byte) {
 	if len(msg) > 200 {
 		msg = msg[:200]
 	}
+
+	// Slash commands.
+	if strings.HasPrefix(msg, "/") {
+		w.handleChatCommand(p, msg)
+		return
+	}
+
+	// Drunk: mangle chat.
+	if hasEffect(p, FXDrunk) {
+		msg = drunkMangleText(msg)
+	}
+
+	// Disguised: send as "???" so other players see no name attribution.
+	name := p.CharName
+	if p.Disguised {
+		name = "???"
+	}
+
 	w.broadcastMapAndSelf(p.MapID, proto.MsgSChat,
-		buildChat(p.InstanceID, proto.ChatNormal, msg, p.CharName))
+		buildChat(p.InstanceID, proto.ChatNormal, msg, name))
+}
+
+// handleChatCommand processes "/" commands typed in chat.
+func (w *World) handleChatCommand(p *Player, msg string) {
+	parts := strings.SplitN(msg, " ", 2)
+	cmd := strings.ToLower(parts[0])
+	arg := ""
+	if len(parts) > 1 {
+		arg = strings.TrimSpace(parts[1])
+	}
+
+	switch cmd {
+	case "/spectate":
+		w.setSpectating(p, !p.Spectating)
+	case "/sign":
+		if arg == "" {
+			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("Usage: /sign <text>"))
+			return
+		}
+		w.handlePlaceSign(p, func() []byte {
+			wr := proto.NewWriter(4 + len(arg))
+			wr.WriteStr(arg)
+			return wr.Bytes()
+		}())
+	case "/divorce":
+		if p.MarriedTo == "" {
+			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You are not married."))
+			return
+		}
+		spouse := p.MarriedTo
+		p.MarriedTo = ""
+		// If spouse is online, clear their MarriedTo too.
+		for _, other := range w.players {
+			if other.CharName == spouse {
+				other.MarriedTo = ""
+				wr := proto.NewWriter(4)
+				wr.WriteU8(2) // divorced
+				wr.WriteStr("")
+				w.sendTo(other, proto.MsgSMarryResult, wr.Bytes())
+				w.sendTo(other, proto.MsgSServerMsg, buildServerMsg(fmt.Sprintf("%s divorced you.", p.CharName)))
+				break
+			}
+		}
+		wr := proto.NewWriter(4)
+		wr.WriteU8(2) // divorced
+		wr.WriteStr("")
+		w.sendTo(p, proto.MsgSMarryResult, wr.Bytes())
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(fmt.Sprintf("You are now divorced from %s.", spouse)))
+	default:
+		// Unknown command — echo back as normal chat so player isn't confused.
+		w.broadcastMapAndSelf(p.MapID, proto.MsgSChat,
+			buildChat(p.InstanceID, proto.ChatNormal, msg, p.CharName))
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -494,11 +709,30 @@ func (w *World) handleEquip(p *Player, payload []byte) {
 		p.ShieldSlot = obj.Index
 	case 3: // helmet
 		p.HelmetSlot = obj.Index
+		// Disguise helm: mask name to other players.
+		n := strings.ToLower(obj.Name)
+		wasDisguised := p.Disguised
+		p.Disguised = strings.Contains(n, "mask") || strings.Contains(n, "disguise")
+		if p.Disguised != wasDisguised {
+			wr := proto.NewWriter(1)
+			if p.Disguised {
+				wr.WriteU8(1)
+			} else {
+				wr.WriteU8(0)
+			}
+			w.sendTo(p, proto.MsgSDisguiseState, wr.Bytes())
+		}
 	case 4: // armor
 		p.ArmorSlot = obj.Index
 	}
 	w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
-	w.broadcastMap(p.MapID, proto.MsgSSetChar, p.BuildSetChar(), p.InstanceID)
+	// Broadcast disguised name or real name depending on state.
+	if p.Disguised {
+		w.sendTo(p, proto.MsgSSetChar, p.BuildSetChar()) // self sees real name
+		w.broadcastMap(p.MapID, proto.MsgSSetChar, p.BuildSetCharDisguised(), p.InstanceID)
+	} else {
+		w.broadcastMapAndSelf(p.MapID, proto.MsgSSetChar, p.BuildSetChar())
+	}
 }
 
 func (w *World) handleUnequip(p *Player, payload []byte) {
@@ -517,13 +751,20 @@ func (w *World) handleUnequip(p *Player, payload []byte) {
 			p.ShieldSlot = 0
 		case 3:
 			p.HelmetSlot = 0
+			// Removing disguise helm.
+			if p.Disguised {
+				p.Disguised = false
+				wr := proto.NewWriter(1)
+				wr.WriteU8(0)
+				w.sendTo(p, proto.MsgSDisguiseState, wr.Bytes())
+			}
 		case 4:
 			p.ArmorSlot = 0
 		}
 	}
 	inv.Equipped = false
 	w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
-	w.broadcastMap(p.MapID, proto.MsgSSetChar, p.BuildSetChar(), p.InstanceID)
+	w.broadcastMapAndSelf(p.MapID, proto.MsgSSetChar, p.BuildSetChar())
 }
 
 // foodRestore defines hunger and thirst restoration per item index.
@@ -569,6 +810,21 @@ func (w *World) handleUseItem(p *Player, payload []byte) {
 	restore, isFood := foodRestore[inv.ObjIndex]
 	if !isFood && obj.Food <= 0 {
 		return // not consumable
+	}
+
+	// Alcoholic drinks apply the FXDrunk status effect.
+	objNameLower := strings.ToLower(obj.Name)
+	if strings.Contains(objNameLower, "ale") || strings.Contains(objNameLower, "beer") ||
+		strings.Contains(objNameLower, "wine") || strings.Contains(objNameLower, "brew") ||
+		strings.Contains(objNameLower, "spirits") || strings.Contains(objNameLower, "mead") {
+		const drunkDuration = 120.0 // 2 minutes per drink
+		applyStatusEffect(p, FXDrunk, drunkDuration, 0)
+		wr := proto.NewWriter(8)
+		wr.WriteI32(p.InstanceID)
+		wr.WriteU8(FXDrunk)
+		wr.WriteU16(60000) // cap duration at uint16 max; client treats this as "very drunk"
+		w.broadcastMapAndSelf(p.MapID, proto.MsgSStatusApplied, wr.Bytes())
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You feel a bit woozy... *hic*"))
 	}
 
 	// Restore HP from food's heal value.

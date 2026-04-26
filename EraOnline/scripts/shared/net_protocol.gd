@@ -40,7 +40,7 @@ enum MsgType {
 
 	## Client → Server (authenticated, HMAC-protected)
 	C_MOVE         = 0x0100,  # direction:u8 (1=N 2=E 3=S 4=W)
-	C_ATTACK       = 0x0101,  # target_id:i32
+	C_ATTACK       = 0x0101,  # target_id:i32, skill_id:u8 (0=basic)
 	C_PICKUP       = 0x0102,  # ground_item_id:i16
 	C_DROP         = 0x0103,  # slot:u8, amount:u16
 	C_EQUIP        = 0x0104,  # slot:u8
@@ -48,6 +48,7 @@ enum MsgType {
 	C_USE_ITEM     = 0x0106,  # slot:u8
 	C_CAST_SPELL   = 0x0107,  # u8 spell_id, i32 target_id (0=ground,-1=self), i16 target_x, i16 target_y
 	C_CHAT         = 0x0108,  # message:str
+	C_FLEE         = 0x010B,  # (no payload) — attempt to break combat
 	C_PING         = 0x01FF,  # timestamp_ms:i64
 
 	## Server → Client (authenticated, HMAC-protected)
@@ -98,6 +99,10 @@ enum MsgType {
 	S_SKILL_PROGRESS = 0x0212,  # u8 skill_id, u16 duration_ms (0=cancel/done)
 	S_VITALS         = 0x0213,  # hunger:u8, thirst:u8
 	S_SKILL_XP       = 0x0214,  # u8 slot_1based, i32 current_xp, i32 xp_needed
+	S_COMBAT_STATE   = 0x0220,  # in_combat:u8, target_id:i32, swing_cd_ms:u16
+	S_SWING_READY    = 0x0221,  # (no payload) — swing timer expired, attack available
+	S_FLEE_RESULT    = 0x0222,  # success:u8
+	S_STATUS_EFFECT  = 0x0223,  # target_id:i32, effect_id:u8, duration_ms:u16 (0=clear)
 	S_XP_GAIN        = 0x0215,  # i32 xp_gained
 	S_LEVEL_UP       = 0x0216,  # u8 new_level
 
@@ -200,6 +205,52 @@ enum MsgType {
 	S_PROJECTILE      = 0x0145,  # i32 caster_id, i32 target_id, u8 proj_type (0=arrow,1=bolt)
 	S_HOTBAR          = 0x0146,  # u8 count (≤10), count×(u8 slot, u8 type, u8 id) — type: 0=ability,1=spell
 	C_SAVE_HOTBAR     = 0x0147,  # u8 count (≤10), count×(u8 slot, u8 type, u8 id)
+
+	## Karma / alignment
+	S_KARMA_UPDATE    = 0x0400,  # i32 karma, u8 alignment (0=neutral,1=lawful,2=chaotic)
+
+	## Duel system
+	C_DUEL_REQUEST    = 0x0500,  # i32 target_id
+	S_DUEL_CHALLENGE  = 0x0501,  # i32 challenger_id, str challenger_name
+	C_DUEL_RESPOND    = 0x0502,  # u8 accept (1=yes)
+	S_DUEL_START      = 0x0503,  # i32 opponent_id, str opponent_name
+	S_DUEL_END        = 0x0504,  # u8 result (0=lost,1=won,2=cancelled)
+	C_DUEL_BET        = 0x0505,  # i32 challenger_id, u8 side (0=challenger,1=target), i32 gold
+	S_DUEL_BET_ACK    = 0x0506,  # u8 success, str reason
+
+	## Carry / throw
+	C_CARRY_REQUEST   = 0x0510,  # i32 target_id
+	S_CARRY_STATE     = 0x0511,  # i32 carrier_id, i32 carried_id (both 0=released)
+	C_THROW           = 0x0512,  # (no payload)
+	C_DROP_CARRIED    = 0x0513,  # (no payload) — escape from carrier
+
+	## Bounty board
+	C_BOUNTY_POST     = 0x0520,  # str target_name, i32 gold
+	C_BOUNTY_LIST     = 0x0521,  # (no payload)
+	S_BOUNTY_LIST     = 0x0522,  # u8 count, count×(str name, i32 bounty)
+
+	## Pickpocket
+	C_PICKPOCKET      = 0x0530,  # i32 target_id
+	S_PICKPOCKET_RESULT = 0x0531, # u8 success, i32 gold_stolen
+
+	## Disguise
+	S_DISGUISE_STATE  = 0x0540,  # u8 disguised (self-only)
+
+	## Signs / graffiti
+	C_PLACE_SIGN      = 0x0550,  # str text
+	C_READ_SIGN       = 0x0551,  # i16 x, i16 y
+	S_SIGN_CONTENT    = 0x0552,  # str text, str placed_by
+	S_SIGN_ADD        = 0x0553,  # i16 x, i16 y
+	S_SIGN_REMOVE     = 0x0554,  # i16 x, i16 y
+
+	## Marriage
+	C_MARRY_PROPOSE   = 0x0570,  # i32 target_id
+	S_MARRY_REQUEST   = 0x0571,  # i32 from_id, str from_name
+	C_MARRY_RESPOND   = 0x0572,  # u8 accept (1=yes)
+	S_MARRY_RESULT    = 0x0573,  # u8 result (1=married,2=divorced), str spouse_name
+
+	## Arena / spectating
+	S_SPECTATE_STATE  = 0x0580,  # u8 spectating (1=on,0=off)
 }
 
 
@@ -228,7 +279,8 @@ const AUTH_LOCKOUT_SECS   : float = 60.0
 ## Rate limits per message type: msg_type → [tokens_per_sec, burst_capacity]
 const RATE_LIMITS : Dictionary = {
 	0x0100: [15, 20],  # C_MOVE
-	0x0101: [2,  4],   # C_ATTACK
+	0x0101: [2,  5],   # C_ATTACK (target_id:i32 + skill_id:u8)
+	0x010B: [0,  0],   # C_FLEE
 	0x0102: [5,  10],  # C_PICKUP
 	0x0103: [5,  10],  # C_DROP
 	0x0104: [5,  10],  # C_EQUIP

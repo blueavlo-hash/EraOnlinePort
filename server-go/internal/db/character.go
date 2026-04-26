@@ -73,6 +73,10 @@ type CharData struct {
 	// Addiction loop persistence.
 	Bounty      int
 	ActiveTitle string
+
+	// Social systems.
+	Karma     int
+	MarriedTo string
 }
 
 // InventorySlot represents one character inventory entry.
@@ -210,7 +214,7 @@ func (db *DB) LoadChar(ctx context.Context, accountID int64, name string) (*Char
 		       hp, max_hp, mp, max_mp, stamina, max_stamina,
 		       gold, head_index, body_index,
 		       weapon_slot, shield_slot, helmet_slot, armor_slot,
-		       hunger, thirst, bounty, active_title
+		       hunger, thirst, bounty, active_title, karma, married_to
 		FROM characters
 		WHERE name = ? COLLATE NOCASE AND account_id = ?`,
 		name, accountID,
@@ -220,7 +224,7 @@ func (db *DB) LoadChar(ctx context.Context, accountID int64, name string) (*Char
 		&c.HP, &c.MaxHP, &c.MP, &c.MaxMP, &c.Stamina, &c.MaxStamina,
 		&c.Gold, &c.HeadIndex, &c.BodyIndex,
 		&c.WeaponSlot, &c.ShieldSlot, &c.HelmetSlot, &c.ArmorSlot,
-		&c.Hunger, &c.Thirst, &c.Bounty, &c.ActiveTitle,
+		&c.Hunger, &c.Thirst, &c.Bounty, &c.ActiveTitle, &c.Karma, &c.MarriedTo,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCharNotFound
@@ -422,12 +426,12 @@ func (db *DB) SaveChar(ctx context.Context, c *CharData) error {
 		    level=?, exp=?, map_id=?, pos_x=?, pos_y=?, heading=?,
 		    hp=?, max_hp=?, mp=?, max_mp=?, stamina=?, max_stamina=?,
 		    gold=?, weapon_slot=?, shield_slot=?, helmet_slot=?, armor_slot=?,
-		    hunger=?, thirst=?, bounty=?, active_title=?, last_saved=unixepoch()
+		    hunger=?, thirst=?, bounty=?, active_title=?, karma=?, married_to=?, last_saved=unixepoch()
 		WHERE id=?`,
 		c.Level, c.Exp, c.MapID, c.PosX, c.PosY, c.Heading,
 		c.HP, c.MaxHP, c.MP, c.MaxMP, c.Stamina, c.MaxStamina,
 		c.Gold, c.WeaponSlot, c.ShieldSlot, c.HelmetSlot, c.ArmorSlot,
-		c.Hunger, c.Thirst, c.Bounty, c.ActiveTitle, c.ID,
+		c.Hunger, c.Thirst, c.Bounty, c.ActiveTitle, c.Karma, c.MarriedTo, c.ID,
 	)
 	if err != nil {
 		return err

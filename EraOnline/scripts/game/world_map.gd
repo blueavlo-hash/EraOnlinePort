@@ -140,6 +140,9 @@ var _aoe_aim_spell: int = 0       # GROUND_AOE aim: left/right-click ground to f
 var _pending_cast_spell: int = 0  # SINGLE_ENEMY aim: left-click NPC to fire
 var _pending_ability: int = 0     # Ranged ability aim: left-click NPC to fire
 
+## Keyboard target (Tab cycling). 0 = none.
+var _kb_target_id: int = 0
+
 ## Neighbor map tiles for seamless border rendering: direction → tiles dict.
 var _neighbor_tiles: Dictionary = {}
 ## Neighbor map IDs currently loaded: direction → map_id.
@@ -324,6 +327,10 @@ func _ready() -> void:
 	# Bounty tracker (no panel — state only)
 	_bounty_ui = preload("res://scripts/ui/bounty_ui.gd").new()
 	add_child(_bounty_ui)
+
+	# Duel UI (challenge popup, active HUD, spectator bets)
+	var _duel_ui := preload("res://scripts/ui/duel_ui.gd").new()
+	add_child(_duel_ui)
 
 	# Event/tournament/login reward banners
 	_event_ui = preload("res://scripts/ui/event_ui.gd").new()
@@ -1517,6 +1524,16 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if _leaderboard_ui != null:
 			_leaderboard_ui.toggle()
 			AudioManager.play_sound(SND_UI_CLICK)
+	elif key.physical_keycode == KEY_TAB:
+		_cycle_target()
+		get_viewport().set_input_as_handled()
+	elif key.physical_keycode == KEY_SPACE:
+		_attack_kb_target()
+		get_viewport().set_input_as_handled()
+	elif key.physical_keycode == KEY_F:
+		if Network.state == Network.State.CONNECTED:
+			Network.send_flee()
+		get_viewport().set_input_as_handled()
 
 
 func _handle_input() -> void:
@@ -2069,6 +2086,8 @@ func _draw_chars_at(map_tile: Vector2i, wx: int, wy: int) -> void:
 			dx = wx + int(c.move_offset.x)
 			dy = wy + int(c.move_offset.y)
 		_draw_char(c, dx, dy)
+		if _kb_target_id != 0 and c_idx == _kb_target_id:
+			_draw_target_bracket(dx, dy)
 
 	# Map-spawned NPCs
 	for npc_id in _map_npcs:
@@ -2078,11 +2097,15 @@ func _draw_chars_at(map_tile: Vector2i, wx: int, wy: int) -> void:
 		var ndx := wx + int(c.move_offset.x)
 		var ndy := wy + int(c.move_offset.y)
 		_draw_char(c, ndx, ndy)
+		if _kb_target_id != 0 and npc_id == _kb_target_id:
+			_draw_target_bracket(ndx, ndy)
 
 	# Training dummy (offline combat test target)
 	if _dummy_char != null and _dummy_char.active and _dummy_char.tile_pos == map_tile:
 		_draw_char(_dummy_char, wx, wy)
 		_draw_dummy_hp_bar(wx, wy)
+		if _kb_target_id == -1:
+			_draw_target_bracket(wx, wy)
 
 
 ## Draw a single character at world pixel (dx, dy).
@@ -2116,6 +2139,22 @@ func _draw_hp_bar(c: CharData, wx: int, wy: int) -> void:
 	draw_rect(Rect2(float(bx - 1), float(by - 1), float(BAR_W + 2), float(BAR_H + 2)), Color(0.0, 0.0, 0.0, 0.75))
 	draw_rect(Rect2(float(bx), float(by), float(BAR_W), float(BAR_H)), Color(0.18, 0.02, 0.02, 0.95))
 	draw_rect(Rect2(float(bx), float(by), float(BAR_W) * frac, float(BAR_H)), Color(0.88, 0.12, 0.12, 1.0))
+
+
+## Draw a selection bracket under the keyboard-targeted entity.
+func _draw_target_bracket(wx: int, wy: int) -> void:
+	const S := 6; const T := 2  # bracket size, thickness
+	var col := Color(0.95, 0.80, 0.10, 0.90)
+	var x := float(wx + 2); var y := float(wy + 4)
+	# Four corner brackets
+	draw_rect(Rect2(x,       y,       S, T),   col)
+	draw_rect(Rect2(x,       y,       T, S),   col)
+	draw_rect(Rect2(x+24,    y,       S, T),   col)
+	draw_rect(Rect2(x+28-T,  y,       T, S),   col)
+	draw_rect(Rect2(x,       y+24,    S, T),   col)
+	draw_rect(Rect2(x,       y+20,    T, S),   col)
+	draw_rect(Rect2(x+24,    y+24,    S, T),   col)
+	draw_rect(Rect2(x+28-T,  y+20,    T, S),   col)
 
 
 # ---------------------------------------------------------------------------
@@ -2340,6 +2379,9 @@ func _on_net_move_char(char_id: int, x: int, y: int, heading: int) -> void:
 
 ## Server removed a character (logout, out of range, death).
 func _on_net_remove_char(char_id: int) -> void:
+	if _kb_target_id == char_id:
+		_kb_target_id = 0
+		queue_redraw()
 	remove_char(char_id)
 
 
@@ -2483,6 +2525,67 @@ func _draw_dummy_hp_bar(wx: int, wy: int) -> void:
 	# Label "DUMMY" in small text
 	draw_string(ThemeDB.fallback_font, Vector2(bx - 2, by - 2), "DUMMY",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.9, 0.7, 0.4))
+
+
+# ---------------------------------------------------------------------------
+# Keyboard targeting (Tab / Space / F)
+# ---------------------------------------------------------------------------
+
+## Cycle to the next nearby combat-eligible entity (Tab key).
+func _cycle_target() -> void:
+	# Build sorted list of candidate IDs (players + NPCs, exclude self)
+	var candidates: Array[int] = []
+	var player_tile := cam_tile
+	for cid in _chars:
+		if cid == _player_idx:
+			continue
+		var c: CharData = _chars[cid]
+		if not c.active:
+			continue
+		candidates.append(cid)
+	for nid in _map_npcs:
+		var c: CharData = _map_npcs[nid]
+		if not c.active:
+			continue
+		var cmeta: Dictionary = _map_npc_meta.get(nid, {})
+		if cmeta.get("npc_type", 1) != 1:
+			continue
+		candidates.append(nid)
+	if _dummy_char != null and _dummy_char.active:
+		candidates.append(-1)
+	if candidates.is_empty():
+		return
+	# Sort by Chebyshev distance from player
+	candidates.sort_custom(func(a: int, b: int) -> bool:
+		var pa: Vector2i = _get_entity_tile(a)
+		var pb: Vector2i = _get_entity_tile(b)
+		var da := maxi(abs(pa.x - player_tile.x), abs(pa.y - player_tile.y))
+		var db := maxi(abs(pb.x - player_tile.x), abs(pb.y - player_tile.y))
+		return da < db)
+	# Advance past current target
+	var cur_idx := candidates.find(_kb_target_id)
+	_kb_target_id = candidates[(cur_idx + 1) % candidates.size()]
+	queue_redraw()
+
+
+## Attack current keyboard target (Space key).
+func _attack_kb_target() -> void:
+	if _kb_target_id == 0:
+		return
+	if Network.state == Network.State.CONNECTED:
+		Network.send_attack(_kb_target_id, 0)
+	elif _kb_target_id == -1 and _dummy_char != null:
+		CombatSystem.use_skill(0, -1)
+
+
+func _get_entity_tile(entity_id: int) -> Vector2i:
+	if entity_id == -1 and _dummy_char != null:
+		return _dummy_tile
+	if _chars.has(entity_id):
+		return (_chars[entity_id] as CharData).tile_pos
+	if _map_npcs.has(entity_id):
+		return (_map_npcs[entity_id] as CharData).tile_pos
+	return cam_tile
 
 
 # ---------------------------------------------------------------------------

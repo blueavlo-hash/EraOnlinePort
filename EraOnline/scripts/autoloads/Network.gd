@@ -91,6 +91,26 @@ signal on_tourney_scores(scores: Array)
 signal on_login_reward(streak_day: int, gold: int, message: String)
 signal on_time_of_day(hour: float)  # 0.0–24.0 in-game hours
 signal on_projectile(caster_id: int, target_id: int, proj_type: int)
+signal on_combat_state(in_combat: bool, target_id: int, swing_cd_ms: int)
+signal on_swing_ready()
+signal on_flee_result(success: bool)
+
+## Social / sandbox signals
+signal on_karma_update(karma: int, alignment: int)        # alignment 0=neutral,1=lawful,2=chaotic
+signal on_duel_challenge(challenger_id: int, challenger_name: String)
+signal on_duel_start(opponent_id: int, opponent_name: String)
+signal on_duel_end(result: int)                            # 0=lost,1=won,2=cancelled
+signal on_duel_bet_ack(success: bool, reason: String)
+signal on_carry_state(carrier_id: int, carried_id: int)   # both 0 = released
+signal on_bounty_list(entries: Array)                      # Array of {name, bounty}
+signal on_pickpocket_result(success: bool, gold: int)
+signal on_disguise_state(disguised: bool)
+signal on_sign_add(x: int, y: int)
+signal on_sign_remove(x: int, y: int)
+signal on_sign_content(text: String, placed_by: String)
+signal on_marry_request(from_id: int, from_name: String)
+signal on_marry_result(result: int, spouse_name: String)   # 1=married,2=divorced
+signal on_spectate_state(spectating: bool)
 
 
 # ---------------------------------------------------------------------------
@@ -276,10 +296,79 @@ func send_move(direction: int) -> void:
 	_send_auth(NetProtocol.MsgType.C_MOVE, w.get_bytes())
 
 
-func send_attack(target_id: int) -> void:
+func send_attack(target_id: int, skill_id: int = 0) -> void:
 	var w := NetProtocol.PacketWriter.new()
 	w.write_i32(target_id)
+	w.write_u8(skill_id)
 	_send_auth(NetProtocol.MsgType.C_ATTACK, w.get_bytes())
+
+
+func send_flee() -> void:
+	_send_auth(NetProtocol.MsgType.C_FLEE, PackedByteArray())
+
+## Social send functions
+func send_duel_request(target_id: int) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_i32(target_id)
+	_send_auth(NetProtocol.MsgType.C_DUEL_REQUEST, w.get_bytes())
+
+func send_duel_respond(accept: bool) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_u8(1 if accept else 0)
+	_send_auth(NetProtocol.MsgType.C_DUEL_RESPOND, w.get_bytes())
+
+func send_duel_bet(challenger_id: int, side: int, gold: int) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_i32(challenger_id)
+	w.write_u8(side)
+	w.write_i32(gold)
+	_send_auth(NetProtocol.MsgType.C_DUEL_BET, w.get_bytes())
+
+func send_carry_request(target_id: int) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_i32(target_id)
+	_send_auth(NetProtocol.MsgType.C_CARRY_REQUEST, w.get_bytes())
+
+func send_throw() -> void:
+	_send_auth(NetProtocol.MsgType.C_THROW, PackedByteArray())
+
+func send_drop_carried() -> void:
+	_send_auth(NetProtocol.MsgType.C_DROP_CARRIED, PackedByteArray())
+
+func send_bounty_post(target_name: String, gold: int) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_str(target_name)
+	w.write_i32(gold)
+	_send_auth(NetProtocol.MsgType.C_BOUNTY_POST, w.get_bytes())
+
+func send_bounty_list() -> void:
+	_send_auth(NetProtocol.MsgType.C_BOUNTY_LIST, PackedByteArray())
+
+func send_pickpocket(target_id: int) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_i32(target_id)
+	_send_auth(NetProtocol.MsgType.C_PICKPOCKET, w.get_bytes())
+
+func send_place_sign(text: String) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_str(text)
+	_send_auth(NetProtocol.MsgType.C_PLACE_SIGN, w.get_bytes())
+
+func send_read_sign(x: int, y: int) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_i16(x)
+	w.write_i16(y)
+	_send_auth(NetProtocol.MsgType.C_READ_SIGN, w.get_bytes())
+
+func send_marry_propose(target_id: int) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_i32(target_id)
+	_send_auth(NetProtocol.MsgType.C_MARRY_PROPOSE, w.get_bytes())
+
+func send_marry_respond(accept: bool) -> void:
+	var w := NetProtocol.PacketWriter.new()
+	w.write_u8(1 if accept else 0)
+	_send_auth(NetProtocol.MsgType.C_MARRY_RESPOND, w.get_bytes())
 
 
 func send_pickup(ground_item_id: int) -> void:
@@ -1198,6 +1287,15 @@ func _dispatch_auth(msg_type: int, payload: PackedByteArray) -> void:
 		NetProtocol.MsgType.S_PROJECTILE:
 			on_projectile.emit(r.read_i32(), r.read_i32(), r.read_u8())
 
+		NetProtocol.MsgType.S_COMBAT_STATE:
+			on_combat_state.emit(r.read_u8() != 0, r.read_i32(), int(r.read_u16()))
+
+		NetProtocol.MsgType.S_SWING_READY:
+			on_swing_ready.emit()
+
+		NetProtocol.MsgType.S_FLEE_RESULT:
+			on_flee_result.emit(r.read_u8() != 0)
+
 		NetProtocol.MsgType.S_HOTBAR:
 			var hb_count := r.read_u8()
 			var hb_slots: Array = []
@@ -1207,6 +1305,55 @@ func _dispatch_auth(msg_type: int, payload: PackedByteArray) -> void:
 				var slot_id   := r.read_u8()
 				hb_slots.append({"slot": slot_idx, "type": "ability" if slot_type == 0 else "spell", "id": slot_id})
 			on_hotbar.emit(hb_slots)
+
+		NetProtocol.MsgType.S_KARMA_UPDATE:
+			on_karma_update.emit(r.read_i32(), r.read_u8())
+
+		NetProtocol.MsgType.S_DUEL_CHALLENGE:
+			on_duel_challenge.emit(r.read_i32(), r.read_str())
+
+		NetProtocol.MsgType.S_DUEL_START:
+			on_duel_start.emit(r.read_i32(), r.read_str())
+
+		NetProtocol.MsgType.S_DUEL_END:
+			on_duel_end.emit(r.read_u8())
+
+		NetProtocol.MsgType.S_DUEL_BET_ACK:
+			on_duel_bet_ack.emit(r.read_u8() != 0, r.read_str())
+
+		NetProtocol.MsgType.S_CARRY_STATE:
+			on_carry_state.emit(r.read_i32(), r.read_i32())
+
+		NetProtocol.MsgType.S_BOUNTY_LIST:
+			var bl_count := r.read_u8()
+			var bl_entries: Array = []
+			for _bli in bl_count:
+				bl_entries.append({"name": r.read_str(), "bounty": r.read_i32()})
+			on_bounty_list.emit(bl_entries)
+
+		NetProtocol.MsgType.S_PICKPOCKET_RESULT:
+			on_pickpocket_result.emit(r.read_u8() != 0, r.read_i32())
+
+		NetProtocol.MsgType.S_DISGUISE_STATE:
+			on_disguise_state.emit(r.read_u8() != 0)
+
+		NetProtocol.MsgType.S_SIGN_ADD:
+			on_sign_add.emit(r.read_i16(), r.read_i16())
+
+		NetProtocol.MsgType.S_SIGN_REMOVE:
+			on_sign_remove.emit(r.read_i16(), r.read_i16())
+
+		NetProtocol.MsgType.S_SIGN_CONTENT:
+			on_sign_content.emit(r.read_str(), r.read_str())
+
+		NetProtocol.MsgType.S_MARRY_REQUEST:
+			on_marry_request.emit(r.read_i32(), r.read_str())
+
+		NetProtocol.MsgType.S_MARRY_RESULT:
+			on_marry_result.emit(r.read_u8(), r.read_str())
+
+		NetProtocol.MsgType.S_SPECTATE_STATE:
+			on_spectate_state.emit(r.read_u8() != 0)
 
 		_:
 			push_warning("[Network] Unknown auth msg 0x%04X" % msg_type)

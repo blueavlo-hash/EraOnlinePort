@@ -182,6 +182,57 @@ func (w *World) tickPoison() {
 	}
 }
 
+// tickStatusEffects ticks all active status effects on a player for one world tick.
+// Bleed fires every 2 seconds; stun/root/mdrain just track remaining time.
+func (w *World) tickStatusEffects(p *Player, deltaSec float64) {
+	if len(p.StatusEffects) == 0 {
+		return
+	}
+	active := p.StatusEffects[:0]
+	for _, fx := range p.StatusEffects {
+		fx.Remaining -= deltaSec
+
+		// FXDrunk: just track remaining (visual on client); no server-side tick actions.
+		if fx.Type == FXDrunk && fx.Remaining <= 0 {
+			// Expiry handled below — fall through.
+		}
+		if fx.Type == FXBleed && fx.Remaining > 0 {
+			fx.TickTimer -= deltaSec
+			if fx.TickTimer <= 0 {
+				fx.TickTimer += 2.0
+				dmg := imax(1, fx.DmgPerTick)
+				p.HP = imax(0, p.HP-dmg)
+				w.broadcastMap(p.MapID, proto.MsgSDamage, buildDamage(p.InstanceID, int16(dmg), false), -1)
+				wr := proto.NewWriter(6)
+				wr.WriteI16(int16(p.HP))
+				wr.WriteI16(int16(p.MP))
+				wr.WriteI16(int16(p.Stamina))
+				w.sendTo(p, proto.MsgSHealth, wr.Bytes())
+				if p.HP == 0 {
+					killerName := ""
+					if src, ok := w.players[p.BleedSourceID]; ok {
+						killerName = src.CharName
+					}
+					w.playerDied(p, killerName)
+					p.StatusEffects = nil
+					return
+				}
+			}
+		}
+
+		if fx.Remaining > 0 {
+			active = append(active, fx)
+		} else {
+			// Effect expired — notify clients.
+			wr := proto.NewWriter(5)
+			wr.WriteI32(p.InstanceID)
+			wr.WriteU8(uint8(fx.Type))
+			w.broadcastMap(p.MapID, proto.MsgSStatusRemoved, wr.Bytes(), -1)
+		}
+	}
+	p.StatusEffects = active
+}
+
 // tickWeather checks for rain changes.
 func (w *World) tickWeather() {
 	var newRaining bool
