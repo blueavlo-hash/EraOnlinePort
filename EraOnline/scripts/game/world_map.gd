@@ -94,7 +94,8 @@ var _level_up_ui: Node = null
 
 ## Day/night lighting
 var _time_of_day:     float = 8.0     # in-game hours 0-24, set by server
-var _canvas_mod:      CanvasModulate = null
+var _night_layer:     CanvasLayer    = null  # overlay between world (0) and HUD (10)
+var _night_overlay:   ColorRect      = null
 var _player_light:    PointLight2D   = null
 var _light_tex:       ImageTexture   = null  # generated radial gradient
 
@@ -354,13 +355,15 @@ func _ready() -> void:
 	_enchanting_ui = preload("res://scripts/ui/enchanting_ui.gd").new()
 	add_child(_enchanting_ui)
 
-	# Day/night lighting — CanvasModulate tints the world canvas only.
-	# layer_range_max = 0 ensures UI layers (HUD=10, etc.) are not darkened at night.
-	_canvas_mod = CanvasModulate.new()
-	_canvas_mod.color = Color.WHITE
-	_canvas_mod.layer_range_min = 0
-	_canvas_mod.layer_range_max = 0
-	add_child(_canvas_mod)
+	# Day/night lighting — dark overlay on layer 5 (above world=0, below HUD=10).
+	# This guarantees the HUD is never dimmed regardless of Godot API version.
+	_night_layer = CanvasLayer.new()
+	_night_layer.layer = 5
+	add_child(_night_layer)
+	_night_overlay = ColorRect.new()
+	_night_overlay.color = Color(0.0, 0.0, 0.0, 0.0)
+	_night_layer.add_child(_night_overlay)
+	_night_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 
 	# Player point light — visible at night, radius driven by gear/skill
 	_light_tex = _make_light_texture(256)
@@ -3283,7 +3286,7 @@ func _on_net_time_of_day(hour: float) -> void:
 
 
 func _update_lighting() -> void:
-	if _canvas_mod == null:
+	if _night_overlay == null:
 		return
 
 	# --- Compute darkness 0.0 (full day) to 1.0 (full night) ---
@@ -3302,10 +3305,10 @@ func _update_lighting() -> void:
 	elif t >= 5.0 and t < 6.0:
 		darkness = 1.0 - (t - 5.0)           # dawn ramp 1→0
 
-	# Night sky tint: dark navy — min brightness 0.25 so the world is never pitch black
-	var day_col   := Color(1.0,  1.0,  1.0,  1.0)
-	var night_col := Color(0.25, 0.25, 0.35, 1.0)
-	_canvas_mod.color = day_col.lerp(night_col, darkness)
+	# Night overlay: transparent at day, dark navy at full night.
+	# Sits on layer 5 so it covers the world (0) but never touches HUD (10+).
+	var night_ov := Color(0.0, 0.0, 0.13, 0.75)
+	_night_overlay.color = Color(0.0, 0.0, 0.0, 0.0).lerp(night_ov, darkness)
 
 	# Propagate darkness to minimap
 	if _minimap != null and _minimap.has_method("set_darkness"):

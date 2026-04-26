@@ -1,6 +1,11 @@
 [
     {
         "date": "APRIL 2026",
+        "title": "v0.5.23-alpha — HUD Fix (Definitive)",
+        "body": "Night lighting is now a canvas overlay that sits between the world and the UI — the hotbar can never be darkened or hidden regardless of time of day. If you couldn't see the HUD before, this fixes it."
+    },
+    {
+        "date": "APRIL 2026",
         "title": "v0.5.22-alpha — HUD Always Visible + Merchants on Starting Map",
         "body": "HUD hotbar is now always at full brightness — day/night lighting no longer darkens the UI. Mira the Merchant (ale, chalk, enchanting crystal, free gold), two Bounty Boards, and a Tester NPC are now on the starting map near the trainers."
     },
