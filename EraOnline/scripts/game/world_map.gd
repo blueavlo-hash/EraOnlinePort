@@ -201,6 +201,7 @@ func _ready() -> void:
 	Network.on_chat.connect(_on_net_chat)
 	Network.on_kicked.connect(_on_net_kicked)
 	Network.on_damage.connect(_on_net_damage)
+	Network.on_combat_state.connect(_on_net_combat_state)
 	Network.shop_list_received.connect(_on_shop_list)
 	Network.on_ability_shop.connect(_on_ability_shop_received)
 	Network.rain_changed.connect(_on_rain_changed)
@@ -2383,6 +2384,16 @@ func _on_net_remove_char(char_id: int) -> void:
 		_kb_target_id = 0
 		queue_redraw()
 	remove_char(char_id)
+
+
+## Auto-target the aggressor when an NPC enters combat with us.
+func _on_net_combat_state(in_combat: bool, target_id: int, _swing_ms: int) -> void:
+	if in_combat and target_id != 0 and _kb_target_id == 0:
+		_kb_target_id = target_id
+		queue_redraw()
+	elif not in_combat:
+		_kb_target_id = 0
+		queue_redraw()
 
 
 ## Server warped us to a different map (tile exit, spell, GM warp).

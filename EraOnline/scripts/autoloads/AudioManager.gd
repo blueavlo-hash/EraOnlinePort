@@ -132,18 +132,20 @@ func set_music_volume(vol: float) -> void:
 ## Footstep cycling — rotates through snd3.ogg variants (snd3b/c/d/e) so steps
 ## don't sound identical every time.  Only used when play_sound(Sound.WARP) is
 ## called from the footstep path in world_map.gd.
-const FOOTSTEP_VARIANTS := ["snd3", "snd3b", "snd3c", "snd3d"]
+const FOOTSTEP_VARIANTS := ["snd3b", "snd3c", "snd3d", "snd3e"]
 var _footstep_idx: int = 0
 
 func play_footstep() -> void:
-	var stream := _load_stream(SOUNDS_PATH + "short-muffled-footstep-sound.mp3")
+	var key: String = FOOTSTEP_VARIANTS[_footstep_idx % FOOTSTEP_VARIANTS.size()]
+	_footstep_idx += 1
+	var stream := _get_sfx_stream_by_key(key)
 	if stream == null:
 		return
 	var player := _get_free_player()
 	if player == null:
 		return
 	player.stream = stream
-	player.volume_db = linear_to_db(sfx_volume)
+	player.volume_db = linear_to_db(sfx_volume * 0.6)  # footsteps quieter than combat sounds
 	player.play()
 
 func _get_sfx_stream(sound_num: int) -> AudioStream:
