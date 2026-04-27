@@ -190,10 +190,13 @@ func _activate_slot(idx: int) -> void:
 
 func _build_hud() -> void:
 	var hud := Panel.new()
-	hud.size     = Vector2(VW, HUD_H)
-	hud.position = Vector2(0, VH - HUD_H)
 	hud.add_theme_stylebox_override("panel", _box(C_PANEL_BG, C_PANEL_EDGE, 2, 0))
-	add_child(hud)
+	add_child(hud)  # must be in tree before layout
+	hud.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	hud.offset_top    = -HUD_H
+	hud.offset_bottom = 0
+	hud.offset_left   = 0
+	hud.offset_right  = 0
 
 	# XP bar
 	var xp_bg := ColorRect.new(); xp_bg.color = C_XP_BG
