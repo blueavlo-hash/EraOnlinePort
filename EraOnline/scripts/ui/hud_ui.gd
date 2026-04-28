@@ -9,10 +9,10 @@ signal slot_activated(slot_idx: int)    ## Fired when a hotbar slot key is press
 # ---------------------------------------------------------------------------
 # Palette
 # ---------------------------------------------------------------------------
-const C_PANEL_BG    := Color(0.06, 0.04, 0.02, 0.96)
-const C_PANEL_EDGE  := Color(0.50, 0.37, 0.12, 1.00)
-const C_SECTION_BG  := Color(0.10, 0.07, 0.03, 1.00)
-const C_SECTION_EDG := Color(0.35, 0.25, 0.08, 1.00)
+const C_PANEL_BG    := Color(0.18, 0.12, 0.05, 1.00)
+const C_PANEL_EDGE  := Color(0.95, 0.75, 0.20, 1.00)
+const C_SECTION_BG  := Color(0.24, 0.17, 0.07, 1.00)
+const C_SECTION_EDG := Color(0.70, 0.52, 0.16, 1.00)
 const C_GOLD        := Color(0.88, 0.68, 0.18, 1.00)
 const C_GOLD_DIM    := Color(0.60, 0.45, 0.12, 1.00)
 const C_TEXT        := Color(0.92, 0.86, 0.70, 1.00)
@@ -190,13 +190,10 @@ func _activate_slot(idx: int) -> void:
 
 func _build_hud() -> void:
 	var hud := Panel.new()
-	hud.add_theme_stylebox_override("panel", _box(C_PANEL_BG, C_PANEL_EDGE, 2, 0))
-	add_child(hud)  # must be in tree before layout
-	hud.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	hud.offset_top    = -HUD_H
-	hud.offset_bottom = 0
-	hud.offset_left   = 0
-	hud.offset_right  = 0
+	hud.size     = Vector2(VW, HUD_H)
+	hud.position = Vector2(0, VH - HUD_H)
+	hud.add_theme_stylebox_override("panel", _box(C_PANEL_BG, C_PANEL_EDGE, 3, 0))
+	add_child(hud)
 
 	# XP bar
 	var xp_bg := ColorRect.new(); xp_bg.color = C_XP_BG
