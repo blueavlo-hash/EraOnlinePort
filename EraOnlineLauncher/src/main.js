@@ -166,7 +166,7 @@ ipcMain.on('window-close',    () => app.quit())
 // ---------------------------------------------------------------------------
 ipcMain.handle('check-update', async () => {
   try {
-    const manifest = await fetchJson(MANIFEST_URL)
+    const manifest = await fetchJson(MANIFEST_URL + '?t=' + Date.now())
     const installedVersion = fs.existsSync(VERSION_FILE)
       ? fs.readFileSync(VERSION_FILE, 'utf8').trim()
       : null
