@@ -293,6 +293,9 @@ const RAIN_CHANCE      := 0.15   # 15% chance to start raining each check
 ## Per-player active skill timer: peer_id → {skill_id, time_left, tile, yield_obj}
 var _skill_timers: Dictionary = {}
 
+## Combat state: peer_id → {swing_cd:float, combat_timer:float, combat_target:int}
+var _combat_state: Dictionary = {}
+
 ## Ground items: id → {id, obj_index, amount, map_id, x, y, expires_at}
 var _ground_items: Dictionary = {}
 var _ground_item_counter: int = 1
@@ -695,6 +698,9 @@ func _process(delta: float) -> void:
 			_complete_skill(pid, st["skill_id"], st["tile"],
 					st.get("action", ""), st.get("aux", {}))
 			break  # erase-safe: restart next frame
+
+	## Combat state ticks: swing cooldown, combat timer, bleed DoTs
+	_tick_combat_state(delta)
 
 	## NPC AI tick (also handles encounter despawn)
 	_npc_ai_acc += delta
@@ -2798,6 +2804,7 @@ func _enter_world(client, char_dict: Dictionary) -> void:
 	ww.write_i32(map_id)
 	ww.write_i16(cx)
 	ww.write_i16(cy)
+	ww.write_i32(client.peer_id)
 	client.send_auth(NetProtocol.MsgType.S_WORLD_STATE, ww.get_bytes())
 
 	# Normalize spells array to int (avoids string/int duplicates from old saves).

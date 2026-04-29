@@ -163,6 +163,7 @@ type GroundItem struct {
 	ObjIndex int
 	Amount   int
 	Timeout  int // world ticks until auto-despawn
+	Enchant  int // pre-applied enchant level (0 = none); set on NPC rare drops
 }
 
 // New creates a new World. Call Run() to start the game loop.
@@ -394,10 +395,11 @@ func (w *World) handleJoin(connID uint64, info *JoinInfo) {
 
 	// Send world state to the new player.
 	{
-		wr := proto.NewWriter(8)
+		wr := proto.NewWriter(12)
 		wr.WriteI32(int32(p.MapID))
 		wr.WriteI16(int16(p.X))
 		wr.WriteI16(int16(p.Y))
+		wr.WriteI32(instanceID)
 		w.sendTo(p, proto.MsgSWorldState, wr.Bytes())
 	}
 
@@ -754,10 +756,11 @@ func (w *World) playerDied(p *Player, killerName string) {
 
 	// Send world state + new char position.
 	{
-		wr2 := proto.NewWriter(8)
+		wr2 := proto.NewWriter(12)
 		wr2.WriteI32(int32(p.MapID))
 		wr2.WriteI16(int16(p.X))
 		wr2.WriteI16(int16(p.Y))
+		wr2.WriteI32(p.InstanceID)
 		w.sendTo(p, proto.MsgSWorldState, wr2.Bytes())
 	}
 	w.sendTo(p, proto.MsgSStats, p.BuildStats())

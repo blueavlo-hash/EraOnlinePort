@@ -1,6 +1,11 @@
 [
     {
         "date": "APRIL 2026",
+        "title": "v0.5.28-alpha — Character Duplication Fix",
+        "body": "Fixed a bug where equipping or unequipping items caused your character to visually duplicate on screen. The server now correctly identifies your own character in appearance update packets."
+    },
+    {
+        "date": "APRIL 2026",
         "title": "v0.5.27-alpha — HUD Restored",
         "body": "Fixed a GDScript compile error introduced in v0.5.18 that prevented the entire bottom HUD from rendering — HP/MP/STA bars, hotbar, gold, and XP are all back. Also fixed the launcher auto-updater which was failing with a SHA512 mismatch due to an incorrect download URL."
     },

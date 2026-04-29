@@ -857,9 +857,10 @@ func _dispatch_auth(msg_type: int, payload: PackedByteArray) -> void:
 			if state == State.CHAR_SELECT:
 				state = State.CONNECTED
 				print("[Network] Entering world — state CONNECTED")
-			var map_id := r.read_i32()
-			var wx     := r.read_i16()
-			var wy     := r.read_i16()
+			var map_id  := r.read_i32()
+			var wx      := r.read_i16()
+			var wy      := r.read_i16()
+			local_char_id = r.read_i32()
 			last_world_state = {"map_id": map_id, "x": wx, "y": wy}
 			on_world_state.emit(map_id, wx, wy)
 
