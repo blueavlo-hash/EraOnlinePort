@@ -127,7 +127,7 @@ const TOOLTIP_DELAY := 0.55
 # ---------------------------------------------------------------------------
 
 func _ready() -> void:
-	layer = 10
+	layer = 9
 	_build_hud()
 	_build_combat_bar()
 	PlayerState.stats_changed.connect(_refresh_bars)
