@@ -1,8 +1,8 @@
 [
     {
         "date": "APRIL 2026",
-        "title": "v0.5.25-alpha — Bottom Bar Visibility Fix",
-        "body": "The health/mana/stamina bars, hotbar, and gold display at the bottom of the screen were blending into the dark tile background. Panel and section colors are now noticeably brighter with a heavier gold border so the bar is clearly visible regardless of what map tiles are behind it. Layout reverted from anchor-based to explicit positioning to match the rest of the UI."
+        "title": "v0.5.27-alpha — HUD Restored",
+        "body": "Fixed a GDScript compile error introduced in v0.5.18 that prevented the entire bottom HUD from rendering — HP/MP/STA bars, hotbar, gold, and XP are all back. Also fixed the launcher auto-updater which was failing with a SHA512 mismatch due to an incorrect download URL."
     },
     {
         "date": "APRIL 2026",
@@ -17,7 +17,7 @@
     {
         "date": "APRIL 2026",
         "title": "v0.5.18-alpha — Social Sandbox & Duel System",
-        "body": "Massive social update. Challenge players to duels — spectators can place gold bets on the outcome. Pick someone up and throw them. Pickpocket nearby players for a cut of their gold. Wear a disguise helm to hide your name. Place signs and graffiti anywhere on the map. Post bounties on players, propose marriage for a shared XP bonus, and watch your karma shift between Lawful and Chaotic based on your choices. Drink ale to get properly drunk. Bug fix: yellow target bracket no longer appears on your own character."
+        "body": "Massive social update. Challenge players to duels — spectators can place gold bets on the outcome. Pick someone up and throw them. Pickpocket nearby players for a cut of their gold. Wear a disguise helm to hide your name. Place signs and graffiti anywhere on the map. Post bounties on players, propose marriage for a shared XP bonus, and watch your karma shift between Lawful and Chaotic based on your choices. Drink ale to get properly drunk."
     },
     {
         "date": "MARCH 2026",
