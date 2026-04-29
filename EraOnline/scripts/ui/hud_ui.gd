@@ -127,7 +127,7 @@ const TOOLTIP_DELAY := 0.55
 # ---------------------------------------------------------------------------
 
 func _ready() -> void:
-	layer = 9
+	layer = 10
 	_build_hud()
 	_build_combat_bar()
 	PlayerState.stats_changed.connect(_refresh_bars)
@@ -895,8 +895,11 @@ func _box(bg: Color, border: Color, bw: int, radius: int = 3) -> StyleBoxFlat:
 func _on_karma_update(karma: int, alignment: int) -> void:
 	if _karma_label == null:
 		return
-	var align_str := ["Neutral", "Lawful", "Chaotic"][alignment]
-	var align_color := [C_TEXT_DIM, Color(0.4, 0.8, 0.4, 1.0), Color(0.85, 0.25, 0.15, 1.0)][alignment]
+	var strs: Array[String] = ["Neutral", "Lawful", "Chaotic"]
+	var cols: Array[Color]  = [C_TEXT_DIM, Color(0.4, 0.8, 0.4, 1.0), Color(0.85, 0.25, 0.15, 1.0)]
+	var idx: int = clampi(alignment, 0, 2)
+	var align_str: String = strs[idx]
+	var align_color: Color = cols[idx]
 	_karma_label.text = "Karma: %d  [%s]" % [karma, align_str]
 	_karma_label.add_theme_color_override("font_color", align_color)
 
