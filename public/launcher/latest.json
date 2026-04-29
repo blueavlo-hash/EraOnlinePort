@@ -1,10 +1,10 @@
 {
-    "version": "0.5.25-alpha",
-    "name": "Era Online 0.5.25-alpha",
-    "published_at": "2026-04-27T21:00:00.000Z",
-    "asset_name": "EraOnline-v0.5.25-alpha-client.zip",
+    "version": "0.5.26-alpha",
+    "name": "Era Online 0.5.26-alpha",
+    "published_at": "2026-04-29T00:00:00.000Z",
+    "asset_name": "EraOnline-v0.5.26-alpha-client.zip",
     "download_parts": [
-        "https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.25-alpha/EraOnline-v0.5.25-alpha-client.zip"
+        "https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.26-alpha/EraOnline-v0.5.26-alpha-client.zip"
     ],
     "launcher_version": "1.0.20",
     "launcher_download": "https://github.com/blueavlo-hash/EraOnlinePort/releases/download/v0.5.25-alpha/Era%20Online%20Launcher%20Setup%201.0.20.exe"
