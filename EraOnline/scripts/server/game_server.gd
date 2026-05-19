@@ -1351,6 +1351,15 @@ func _player_attack_player(attacker_client,
 	if _god_mode.has(target_client.peer_id):
 		return
 
+	# Criminal flag: attacking an innocent player flags you as criminal
+	if not tc.get("criminal", false):
+		var existing: float = attacker.get("criminal_timer", 0.0)
+		if existing <= 0.0:
+			attacker["criminal_timer"] = Constants.CRIMINAL_TIMER
+		else:
+			attacker["criminal_timer"] = existing + Constants.CRIMINAL_EXTEND
+		attacker["criminal"] = true
+
 	var result := _ServerCombatSCR.resolve_attack(attacker, tc)
 	var dmg: int   = result["dmg"]
 	var evaded: bool = result["evaded"]
@@ -1541,6 +1550,10 @@ func _handle_player_death(killer_client, dead_client) -> void:
 	corpse_w.write_i16(CORPSE_GRH)
 	_broadcast_nearby(dead_map_id, dead_x, dead_y,
 			NetProtocol.MsgType.S_CORPSE, corpse_w.get_bytes(), -1)
+
+	# Death clears criminal status (VB6 original behaviour)
+	dead_char["criminal"] = false
+	dead_char.erase("criminal_timer")
 
 	# Death penalty: strip gold and most items; gold goes directly to killer
 	var loss_msg: String = _apply_death_penalty(dead_char)
@@ -4011,6 +4024,10 @@ func _handle_npc_killed_player(npc: Dictionary, dead_client) -> void:
 	var map_data := GameData.get_map(map_id)
 	var sp: Dictionary = map_data.get("start_pos", {"x": 10, "y": 10})
 
+	# Death clears criminal status
+	dead_char["criminal"] = false
+	dead_char.erase("criminal_timer")
+
 	# Death penalty: drop gold and most items at death location
 	var loss_msg: String = _apply_death_penalty(dead_char)
 
@@ -5290,6 +5307,15 @@ func _tick_regen() -> void:
 			_starve_death(client)
 			continue
 
+		# --- Criminal timer decay ---
+		if c.get("criminal", false):
+			var ct: float = c.get("criminal_timer", 0.0) - REGEN_INTERVAL
+			if ct <= 0.0:
+				c["criminal"] = false
+				c.erase("criminal_timer")
+			else:
+				c["criminal_timer"] = ct
+
 		# --- Vitals-based regen modifiers ---
 		var regen_hp_bonus: int = 0
 		var regen_mp_bonus: int = 0
@@ -5536,6 +5562,7 @@ func _broadcast_set_char(client) -> void:
 	w.write_i16(c.get("hp", c.get("max_hp", 1)))
 	w.write_i16(c.get("max_hp", 1))
 	w.write_str(c.get("name", ""))
+	w.write_u8(1 if c.get("criminal", false) else 0)
 	_broadcast_nearby(map_id, cx, cy, NetProtocol.MsgType.S_SET_CHAR,
 			w.get_bytes(), -1)
 

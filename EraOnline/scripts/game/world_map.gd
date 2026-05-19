@@ -190,6 +190,7 @@ class CharData:
 	var weapon_anims: Array = []  # 4 x GrhAnimator
 	var shield_anims: Array = []  # 4 x GrhAnimator
 	var char_name: String = ""
+	var is_criminal: bool = false
 
 
 # ---------------------------------------------------------------------------
@@ -762,9 +763,11 @@ func _build_anims(c: CharData) -> void:
 
 ## Add or update a character received from the server.
 func set_char(c_idx: int, body: int, head: int, weapon: int, shield: int,
-		tile: Vector2i, heading: int, name_str: String = "", hp: int = 0, max_hp: int = 0) -> void:
+		tile: Vector2i, heading: int, name_str: String = "", hp: int = 0, max_hp: int = 0,
+		is_criminal: bool = false) -> void:
 	var c := _make_char(body, head, weapon, shield, tile, heading, hp, max_hp)
 	c.char_name = name_str
+	c.is_criminal = is_criminal
 	_chars[c_idx] = c
 	# Store combat classification so targeting can skip service/vendor NPCs.
 	if c_idx >= 10001 and not name_str.is_empty():
@@ -2067,6 +2070,8 @@ func _draw() -> void:
 			p3_col = Color(1.0, 0.95, 0.4, 1.0)
 		elif p3_is_npc:
 			p3_col = Color(0.80, 0.70, 0.52, 0.95)
+		elif p3c.is_criminal:
+			p3_col = Color(1.0, 0.2, 0.2, 1.0)   # red for criminals
 		else:
 			p3_col = Color(1.0, 1.0, 1.0, 1.0)
 		var p3_ly: int = p3y - 42
@@ -2408,7 +2413,8 @@ func _on_net_world_state(map_id: int, x: int, y: int) -> void:
 
 ## Server sent full char data (spawn or update).
 func _on_net_set_char(char_id: int, body: int, head: int, weapon: int, shield: int,
-		x: int, y: int, heading: int, hp: int, max_hp: int, _char_name: String) -> void:
+		x: int, y: int, heading: int, hp: int, max_hp: int, _char_name: String,
+		_is_criminal: bool = false) -> void:
 	if char_id == Network.local_char_id:
 		# This is us — update our CharData but don't move the camera;
 		# camera is already positioned by local prediction.
@@ -2430,10 +2436,10 @@ func _on_net_set_char(char_id: int, body: int, head: int, weapon: int, shield: i
 			_build_anims(p)
 	elif _death_screen != null and _death_screen.is_open():
 		# Death screen is blocking the map load — buffer this char for replay after respawn.
-		_pending_set_chars.append([char_id, body, head, weapon, shield, x, y, heading, hp, max_hp, _char_name])
+		_pending_set_chars.append([char_id, body, head, weapon, shield, x, y, heading, hp, max_hp, _char_name, _is_criminal])
 	else:
 		# Another player/NPC entering our visible area.
-		set_char(char_id, body, head, weapon, shield, Vector2i(x, y), heading, _char_name, hp, max_hp)
+		set_char(char_id, body, head, weapon, shield, Vector2i(x, y), heading, _char_name, hp, max_hp, _is_criminal)
 
 
 ## Server moved a character to a new tile.
@@ -2555,7 +2561,8 @@ func _on_death_respawn_confirmed() -> void:
 	# Replay any SetChar packets that arrived while the death screen was blocking.
 	for args in _pending_set_chars:
 		set_char(args[0], args[1], args[2], args[3], args[4],
-				Vector2i(args[5], args[6]), args[7], args[10], args[8], args[9])
+				Vector2i(args[5], args[6]), args[7], args[10], args[8], args[9],
+				args[11] if args.size() > 11 else false)
 	_pending_set_chars.clear()
 
 

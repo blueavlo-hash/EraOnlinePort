@@ -29,7 +29,7 @@ signal char_deleted(success: bool, reason: String)
 signal on_world_state(map_id: int, x: int, y: int)
 signal on_move_char(char_id: int, x: int, y: int, heading: int)
 signal on_set_char(char_id: int, body: int, head: int, weapon: int, shield: int,
-		x: int, y: int, heading: int, hp: int, max_hp: int, char_name: String)
+		x: int, y: int, heading: int, hp: int, max_hp: int, char_name: String, is_criminal: bool)
 signal on_remove_char(char_id: int)
 signal on_inventory(items: Array)
 signal on_equip_change(slot: int, obj_index: int, amount: int)
@@ -878,8 +878,9 @@ func _dispatch_auth(msg_type: int, payload: PackedByteArray) -> void:
 			var heading := r.read_u8()
 			var hp      := r.read_i16()
 			var max_hp  := r.read_i16()
-			var cname   := r.read_str()
-			on_set_char.emit(cid, body, head, weapon, shield, cx, cy, heading, hp, max_hp, cname)
+			var cname    := r.read_str()
+			var is_crim  := r.read_u8() != 0
+			on_set_char.emit(cid, body, head, weapon, shield, cx, cy, heading, hp, max_hp, cname, is_crim)
 
 		NetProtocol.MsgType.S_REMOVE_CHAR:
 			on_remove_char.emit(r.read_i32())

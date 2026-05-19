@@ -74,7 +74,8 @@ const LEVEL_EXP: Array[int] = [
 # Timing (seconds)
 const ATTACK_COOLDOWN    := 4.0
 const NPC_ATTACK_COOLDOWN:= 4.0
-const CRIMINAL_TIMER     := 60.0
+const CRIMINAL_TIMER     := 3600.0   # 60 minutes (VB6 original)
+const CRIMINAL_EXTEND    := 2700.0   # +45 minutes per additional attack on innocents
 const MEDITATE_INTERVAL  := 10.0
 const EAT_DRINK_INTERVAL := 15.0
 const CAMPFIRE_INTERVAL  := 10.0
