@@ -49,6 +49,7 @@ enum MsgType {
 	C_CAST_SPELL   = 0x0107,  # u8 spell_id, i32 target_id (0=ground,-1=self), i16 target_x, i16 target_y
 	C_CHAT         = 0x0108,  # message:str
 	C_FLEE         = 0x010B,  # (no payload) — attempt to break combat
+	C_UNSTUCK      = 0x010C,  # (no payload) — teleport to nearest walkable tile
 	C_PING         = 0x01FF,  # timestamp_ms:i64
 
 	## Server → Client (authenticated, HMAC-protected)
@@ -281,6 +282,7 @@ const RATE_LIMITS : Dictionary = {
 	0x0100: [15, 20],  # C_MOVE
 	0x0101: [2,  5],   # C_ATTACK (target_id:i32 + skill_id:u8)
 	0x010B: [0,  0],   # C_FLEE
+	0x010C: [0,  3],   # C_UNSTUCK — max 3 uses before rate-limited
 	0x0102: [5,  10],  # C_PICKUP
 	0x0103: [5,  10],  # C_DROP
 	0x0104: [5,  10],  # C_EQUIP

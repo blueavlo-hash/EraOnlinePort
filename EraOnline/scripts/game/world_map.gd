@@ -1398,14 +1398,20 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-## Debug: F1-F9 jump to maps 1-9 directly (kept in _input for one-shot F-key handling).
+## F1 = Unstuck (online) / map-1 debug jump (offline). F2-F9 = debug map jumps.
 func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
-	var fkeys := [KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9]
+	if event.keycode == KEY_F1:
+		if Network.state == Network.State.CONNECTED:
+			Network.send_unstuck()
+		else:
+			_load_map(1)
+		return
+	var fkeys := [KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9]
 	for i in fkeys.size():
 		if event.keycode == fkeys[i]:
-			_load_map(i + 1)
+			_load_map(i + 2)
 			return
 
 

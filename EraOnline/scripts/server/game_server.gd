@@ -1101,6 +1101,9 @@ func _handle_game(client, msg_type: int,
 		NetProtocol.MsgType.C_PENANCE:
 			_on_penance(client, r.read_str())
 
+		NetProtocol.MsgType.C_UNSTUCK:
+			_on_unstuck(client)
+
 
 # ---------------------------------------------------------------------------
 # Game actions
@@ -1180,6 +1183,19 @@ func _on_move(client, direction: int, time_now: float) -> void:
 		_teleport(client, map_data["east_exit"], 2, ny)
 
 
+## Unstuck: find the nearest walkable tile and snap the player there.
+func _on_unstuck(client) -> void:
+	var c: Dictionary = client.char
+	var map_id: int = c.get("map_id", SPAWN_MAP)
+	var cx: int     = c.get("x", SPAWN_X)
+	var cy: int     = c.get("y", SPAWN_Y)
+	var safe := _find_safe_spawn(map_id, cx, cy)
+	_broadcast_remove(client)
+	c["x"] = safe.x
+	c["y"] = safe.y
+	_enter_world(client, c)
+
+
 ## Find the nearest walkable tile at or near (x, y) on map_id.
 ## Prevents teleporting players into blocked/water tiles.
 func _find_safe_spawn(map_id: int, x: int, y: int) -> Vector2i:
@@ -1206,9 +1222,9 @@ func _spawn_walkable(map_id: int, t: Vector2i) -> bool:
 ## already handles newly-logged-in characters whose saved map_id == 1.
 const RESTRICTED_MAPS: Array = []
 ## Default spawn fallback for new characters and death-respawn.
-const SPAWN_MAP: int = 3
-const SPAWN_X:   int = 10
-const SPAWN_Y:   int = 10
+const SPAWN_MAP: int = 81
+const SPAWN_X:   int = 50
+const SPAWN_Y:   int = 49
 
 func _teleport(client, map_id: int, x: int, y: int) -> void:
 	# Redirect restricted maps to spawn.
@@ -5646,9 +5662,9 @@ func _create_character(username: String, name_str: String,
 		"xp":        0,
 		"next_exp":  _ServerCombatSCR.xp_to_next(1),
 		"gold":      500,
-		"map_id":    3,
-		"x":         10,
-		"y":         10,
+		"map_id":    SPAWN_MAP,
+		"x":         SPAWN_X,
+		"y":         SPAWN_Y,
 		"hp":        stats["hp"],   "max_hp":  stats["hp"],
 		"mp":        0,             "max_mp":  stats["max_mp"],
 		"sta":       stats["sta"],  "max_sta": stats["sta"],
@@ -5673,24 +5689,39 @@ func _create_character(username: String, name_str: String,
 
 func _class_starting_skills(class_id: int) -> Array:
 	## Returns an Array of 28 ints (0-indexed) with class-appropriate starting skill values.
+	## Index = skill_number - 1. Skill 6=Tactics, 11=Magery, 12=Lockpicking, 13=Pickpocketing,
+	## 14=Stealth, 16=Swordsmanship, 17=Parrying, 22=Backstabbing, 23=Healing, 27=Meditating, 28=Archery
 	var sk: Array = []
 	sk.resize(28)
 	sk.fill(0)
 	match class_id:
-		0:  # Warrior: sk6=8, sk16=12, sk17=9, sk22=2, sk24=5, sk26=2, sk19=1
-			sk[5]  = 8;  sk[15] = 12; sk[16] = 9;  sk[21] = 2
-			sk[23] = 5;  sk[25] = 2;  sk[18] = 1
-		1:  # Mage: sk6=2, sk8=4, sk10=4, sk11=12, sk14=3, sk18=15, sk19=4, sk22=2, sk23=7, sk25=11, sk26=2, sk27=13
-			sk[5]  = 2;  sk[7]  = 4;  sk[9]  = 4;  sk[10] = 12
-			sk[13] = 3;  sk[17] = 15; sk[18] = 4;  sk[21] = 2
-			sk[22] = 7;  sk[24] = 11; sk[25] = 2;  sk[26] = 13
-		2:  # Rogue: sk1=8, sk2=2, sk15=2, sk19=3, sk23=12, sk25=4, sk26=1, sk27=5
-			sk[0]  = 8;  sk[1]  = 2;  sk[14] = 2;  sk[18] = 3
-			sk[22] = 12; sk[24] = 4;  sk[25] = 1;  sk[26] = 5
-		3:  # Archer: sk6=8, sk3=4, sk7=1, sk8=3, sk10=2, sk16=0, sk19=14, sk23=4, sk25=10, sk26=3, sk27=4, sk28=20
-			sk[5]  = 8;  sk[2]  = 4;  sk[6]  = 1;  sk[7]  = 3
-			sk[9]  = 2;  sk[15] = 0;  sk[18] = 14; sk[22] = 4
-			sk[24] = 10; sk[25] = 3;  sk[26] = 4;  sk[27] = 20  # Archery skill 20 (meets Aimed Shot req)
+		0:  # Warrior — melee fighter
+			sk[5]  = 10  # Tactics: damage bonus in melee
+			sk[15] = 20  # Swordsmanship: hit chance with swords
+			sk[16] = 15  # Parrying: block/dodge chance
+			sk[22] = 10  # Healing: basic bandage skill
+			sk[23] = 8   # Surviving: stamina efficiency
+		1:  # Mage — spellcaster
+			sk[5]  = 2   # Tactics: low (avoids melee)
+			sk[10] = 25  # Magery: required to cast higher spells
+			sk[18] = 10  # Religion Lore: priest-adjacent knowledge
+			sk[22] = 12  # Healing: utility
+			sk[26] = 20  # Meditating: MP regeneration
+		2:  # Rogue — thief / assassin
+			sk[5]  = 8   # Tactics: melee edge
+			sk[11] = 15  # Lockpicking: open doors and chests
+			sk[12] = 10  # Pickpocketing: lift gold from targets
+			sk[13] = 20  # Stealth: move while hidden
+			sk[14] = 10  # Poisoning: coat weapons with poison
+			sk[21] = 20  # Backstabbing: bonus damage from hide
+			sk[15] = 5   # Swordsmanship: some melee competence
+		3:  # Archer — ranged attacker
+			sk[5]  = 8   # Tactics: damage bonus
+			sk[6]  = 5   # Disguise: blend in when needed
+			sk[9]  = 15  # Hiding (Ranger): camouflage outdoors
+			sk[22] = 10  # Healing: field dressing
+			sk[23] = 10  # Surviving: stamina efficiency in the wild
+			sk[27] = 25  # Archery: primary skill — hit chance with bows
 	return sk
 
 
@@ -5713,13 +5744,20 @@ func _class_starting_abilities(class_id: int) -> Array:
 
 func _class_starting_inventory(class_id: int) -> Array:
 	## Returns the starting inventory for a given class as a list of 20 slots.
+	## obj indices: 3=Sword, 32=Dagger, 61=Staff, 23=Hunter's Bow, 87=Pile Of Arrows
 	var inv: Array = []
 	while inv.size() < 20:
 		inv.append({})
 	match class_id:
-		3:  # Archer starts with Hunter's Bow + Pile Of Arrows
-			inv[0] = {"obj_idx": 23, "amount": 1,  "equipped": false}  # Hunter's Bow
-			inv[1] = {"obj_idx": 87, "amount": 50, "equipped": false}  # Pile Of Arrows
+		0:  # Warrior — starts with a Sword
+			inv[0] = {"obj_idx": 3,  "amount": 1, "equipped": false}
+		1:  # Mage — starts with a Staff
+			inv[0] = {"obj_idx": 61, "amount": 1, "equipped": false}
+		2:  # Rogue — starts with a Dagger
+			inv[0] = {"obj_idx": 32, "amount": 1, "equipped": false}
+		3:  # Archer — starts with Hunter's Bow + Pile Of Arrows
+			inv[0] = {"obj_idx": 23, "amount": 1,  "equipped": false}
+			inv[1] = {"obj_idx": 87, "amount": 50, "equipped": false}
 	return inv
 
 

@@ -306,6 +306,9 @@ func send_attack(target_id: int, skill_id: int = 0) -> void:
 func send_flee() -> void:
 	_send_auth(NetProtocol.MsgType.C_FLEE, PackedByteArray())
 
+func send_unstuck() -> void:
+	_send_auth(NetProtocol.MsgType.C_UNSTUCK, PackedByteArray())
+
 ## Social send functions
 func send_duel_request(target_id: int) -> void:
 	var w := NetProtocol.PacketWriter.new()
