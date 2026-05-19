@@ -175,7 +175,7 @@ var classStartSpells = map[int][]int{
 }
 
 // CreateChar creates a new character for the given account.
-func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, classID, head, body int) error {
+func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, classID, head, body, spawnMap, spawnX, spawnY int) error {
 	// Enforce 3-char limit.
 	var count int
 	err := db.sql.QueryRowContext(ctx,
@@ -204,10 +204,11 @@ func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, clas
 
 	res, err := tx.ExecContext(ctx,
 		// Gap 7: starting hunger and thirst = 80 (not 100).
-		`INSERT INTO characters (account_id, name, class_id, head_index, body_index, gold, hunger, thirst, weapon_slot, hp, max_hp, mp, max_mp, stamina, max_stamina)
-		 VALUES (?, ?, ?, ?, ?, 500, 80, 80, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO characters (account_id, name, class_id, head_index, body_index, gold, hunger, thirst, weapon_slot, hp, max_hp, mp, max_mp, stamina, max_stamina, map_id, pos_x, pos_y)
+		 VALUES (?, ?, ?, ?, ?, 500, 80, 80, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		accountID, name, classID, head, body, weaponSlot,
 		ss.hp, ss.hp, ss.mp, ss.mp, ss.sta, ss.sta,
+		spawnMap, spawnX, spawnY,
 	)
 	if err != nil {
 		if isConstraintErr(err) {

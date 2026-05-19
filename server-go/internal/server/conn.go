@@ -501,7 +501,8 @@ func (c *Conn) handleCreateChar(ctx context.Context, payload []byte) error {
 		return c.sendAuth(proto.MsgSCreateResult, result.Bytes())
 	}
 
-	if err := c.srv.db.CreateChar(ctx, c.sess.AccountID, name, int(classID), int(head), int(body)); err != nil {
+	g := c.srv.cfg.Game
+	if err := c.srv.db.CreateChar(ctx, c.sess.AccountID, name, int(classID), int(head), int(body), g.SpawnMap, g.SpawnX, g.SpawnY); err != nil {
 		msg := err.Error()
 		switch err {
 		case db.ErrCharNameTaken:
