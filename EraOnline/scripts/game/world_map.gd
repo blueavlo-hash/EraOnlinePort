@@ -90,6 +90,9 @@ var _local_exit_prediction: Dictionary = {}
 var _pending_reverse_neighbor: Dictionary = {}
 ## SetChar packets buffered while the death screen is blocking _load_map_at.
 var _pending_set_chars: Array = []
+## True between a local map-load (prediction or server) and S_WORLD_STATE confirmation.
+## Suppresses stale S_MOVE_CHAR corrections that arrive from the old map after a teleport.
+var _in_map_transition: bool = false
 var _level_up_ui: Node = null
 
 ## Day/night lighting
@@ -447,6 +450,7 @@ func _load_map_at(map_id: int, spawn: Vector2i) -> void:
 		cam_tile = _safe_spawn(spawn, _tiles)
 	_cam_target = Vector2(cam_tile * TILE)
 	_cam_pixel  = _cam_target        # snap camera instantly
+	_in_map_transition = true        # suppress stale old-map S_MOVE_CHAR corrections
 	if is_inside_tree():
 		_camera.position = _cam_pixel  # sync Camera2D immediately
 	_world_floaters.clear()
@@ -2409,6 +2413,7 @@ func _on_net_world_state(map_id: int, x: int, y: int) -> void:
 		return
 	_pending_set_chars.clear()
 	_load_map_at(map_id, Vector2i(x, y))
+	_in_map_transition = false  # server confirmed new position — accept moves again
 
 
 ## Server sent full char data (spawn or update).
@@ -2445,6 +2450,10 @@ func _on_net_set_char(char_id: int, body: int, head: int, weapon: int, shield: i
 ## Server moved a character to a new tile.
 func _on_net_move_char(char_id: int, x: int, y: int, heading: int) -> void:
 	if char_id == Network.local_char_id:
+		# Discard stale old-map corrections that arrive after a map transition.
+		# _in_map_transition is set in _load_map_at and cleared by _on_net_world_state.
+		if _in_map_transition:
+			return
 		# Server position confirmation — correct if we drifted (e.g. server rejected a move).
 		var server_tile := Vector2i(x, y)
 		if server_tile != cam_tile:
@@ -2517,9 +2526,11 @@ func _on_net_map_change(map_id: int, x: int, y: int) -> void:
 	if not _local_exit_prediction.is_empty():
 		if _local_exit_prediction.get("map_id") == map_id:
 			_local_exit_prediction = {}
+			_in_map_transition = false
 			return
 		_local_exit_prediction = {}
 	_load_map_at(map_id, Vector2i(x, y))
+	_in_map_transition = false
 
 
 ## Server triggered a sound effect.

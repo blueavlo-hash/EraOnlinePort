@@ -1,6 +1,11 @@
 [
     {
         "date": "MAY 2026",
+        "title": "v0.5.30-alpha — Map Transition Fix",
+        "body": "Fixed a bug where teleporting to a new map caused your character to briefly disappear and then slide diagonally without input. The server was sending a movement confirmation for your last step on the old map after the camera had already snapped to the new map spawn — that stale packet was being treated as a drift correction. Movement corrections are now suppressed during the transition window."
+    },
+    {
+        "date": "MAY 2026",
         "title": "v0.5.29-alpha — Map Fixes, Criminal System & World Research",
         "body": "Fixed 89 overworld map exit connections that were pointing to wrong or missing neighbors — every zone transition now matches the original 1999 world map. The criminal system is now fully live: attacking an innocent player flags you as a criminal for 60 minutes (each additional attack adds 45 minutes), guards will chase you, your name turns red for other players, and dying clears your flag. Criminal status now also survives map transitions correctly."
     },
