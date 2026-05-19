@@ -133,13 +133,45 @@ type startItem struct {
 	Equipped bool
 }
 
+// startStats holds the base HP/MP/Stamina for a class at level 1.
+// Must stay in sync with classStats in world/combat.go.
+type startStats struct{ hp, mp, sta int }
+
+var classStartStats = map[int]startStats{
+	dbClassWarrior: {150, 30, 150},
+	dbClassMage:    {80, 120, 100},
+	dbClassRogue:   {100, 60, 120},
+	dbClassArcher:  {100, 80, 110},
+}
+
+// classStartWeapon maps each class to the obj_index of its starting weapon (0 = none).
+var classStartWeapon = map[int]int{
+	dbClassWarrior: 3,  // Sword
+	dbClassMage:    61, // Staff
+	dbClassRogue:   32, // Dagger
+	dbClassArcher:  23, // Hunter's Bow
+}
+
 // classStartItems defines per-class starting inventory.
-// Gap 23: Archer receives Hunter's Bow (item 23) equipped + Pile of Arrows (item 87) qty 50.
 var classStartItems = map[int][]startItem{
-	dbClassArcher: {
-		{ObjIndex: 23, Amount: 1, Equipped: true},  // Hunter's Bow
-		{ObjIndex: 87, Amount: 50, Equipped: false}, // Pile of Arrows
+	dbClassWarrior: {
+		{ObjIndex: 3, Amount: 1, Equipped: true},   // Sword
 	},
+	dbClassMage: {
+		{ObjIndex: 61, Amount: 1, Equipped: true},  // Staff
+	},
+	dbClassRogue: {
+		{ObjIndex: 32, Amount: 1, Equipped: true},  // Dagger
+	},
+	dbClassArcher: {
+		{ObjIndex: 23, Amount: 1, Equipped: true},   // Hunter's Bow
+		{ObjIndex: 87, Amount: 50, Equipped: false},  // Pile of Arrows
+	},
+}
+
+// classStartSpells maps class IDs to their starting spell IDs (empty = no spells).
+var classStartSpells = map[int][]int{
+	dbClassMage: {3}, // Inner Flame
 }
 
 // CreateChar creates a new character for the given account.
@@ -162,17 +194,20 @@ func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, clas
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Determine weapon_slot for classes that start with an equipped weapon.
-	weaponSlot := 0
-	if classID == dbClassArcher {
-		weaponSlot = 23 // Hunter's Bow obj_index (Gap 23)
+	// Determine weapon_slot and starting HP/MP/STA for this class.
+	weaponSlot := classStartWeapon[classID] // 0 if class has no starting weapon
+
+	ss, ok := classStartStats[classID]
+	if !ok {
+		ss = startStats{100, 50, 100} // fallback defaults
 	}
 
 	res, err := tx.ExecContext(ctx,
 		// Gap 7: starting hunger and thirst = 80 (not 100).
-		`INSERT INTO characters (account_id, name, class_id, head_index, body_index, gold, hunger, thirst, weapon_slot)
-		 VALUES (?, ?, ?, ?, ?, 500, 80, 80, ?)`,
+		`INSERT INTO characters (account_id, name, class_id, head_index, body_index, gold, hunger, thirst, weapon_slot, hp, max_hp, mp, max_mp, stamina, max_stamina)
+		 VALUES (?, ?, ?, ?, ?, 500, 80, 80, ?, ?, ?, ?, ?, ?, ?)`,
 		accountID, name, classID, head, body, weaponSlot,
+		ss.hp, ss.hp, ss.mp, ss.mp, ss.sta, ss.sta,
 	)
 	if err != nil {
 		if isConstraintErr(err) {
@@ -186,7 +221,7 @@ func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, clas
 		return err
 	}
 
-	// Gap 23: Give class-specific starting items.
+	// Give class-specific starting items.
 	if items, ok := classStartItems[classID]; ok {
 		for slot, si := range items {
 			eq := 0
@@ -199,6 +234,16 @@ func (db *DB) CreateChar(ctx context.Context, accountID int64, name string, clas
 			); err != nil {
 				return fmt.Errorf("create char starting inventory: %w", err)
 			}
+		}
+	}
+
+	// Give class-specific starting spells.
+	for _, spellID := range classStartSpells[classID] {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO spells (character_id, spell_id) VALUES (?, ?)`,
+			charID, spellID,
+		); err != nil {
+			return fmt.Errorf("create char starting spell: %w", err)
 		}
 	}
 
