@@ -36,6 +36,7 @@ const (
 	MsgCMove         uint16 = 0x0100 // direction:u8 (1=N 2=E 3=S 4=W)
 	MsgCAttack       uint16 = 0x0101 // target_id:i32, skill_id:u8 (0=basic)
 	MsgCFlee         uint16 = 0x010B // (no payload) — attempt to break combat
+	MsgCUnstuck      uint16 = 0x010C // (no payload) — teleport to nearest walkable tile
 	MsgCPickup       uint16 = 0x0102 // ground_item_id:i16
 	MsgCDrop         uint16 = 0x0103 // slot:u8, amount:u16
 	MsgCEquip        uint16 = 0x0104 // slot:u8

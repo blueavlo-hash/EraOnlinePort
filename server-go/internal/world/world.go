@@ -125,6 +125,9 @@ type World struct {
 	// regenTicks counts world ticks; regen fires every 20 ticks (5 seconds).
 	regenTicks int
 
+	// tipTicks fires a gameplay tip every ~10 minutes (2400 ticks at 250ms/tick).
+	tipTicks int
+
 	// Pending trade requests: target_instance_id → requester_instance_id.
 	pendingTrades map[int32]int32
 
@@ -271,6 +274,8 @@ func (w *World) handleMsg(msg ClientMsg) {
 		w.handleAttack(p, msg.Payload)
 	case proto.MsgCFlee:
 		w.handleFlee(p)
+	case proto.MsgCUnstuck:
+		w.handleUnstuck(p)
 	case proto.MsgCChat:
 		w.handleChat(p, msg.Payload)
 	case proto.MsgCPickup:
@@ -547,6 +552,18 @@ func (w *World) tick(timeIncPerTick float64, combatTicksPerAttack int) {
 	// NPC AI tick.
 	for _, npc := range w.npcs {
 		w.tickNPC(npc, combatTicksPerAttack)
+	}
+
+	// Periodic gameplay tips (~10 min real time = 2400 ticks at 250ms/tick).
+	w.tipTicks++
+	if w.tipTicks%2400 == 0 {
+		tips := []string{
+			"Stuck somewhere? Press F1 to teleport to the nearest walkable tile.",
+			"Tip: Press F1 if you ever get stuck on a tile.",
+			"Remember: F1 unstucks you if you're trapped anywhere on the map.",
+		}
+		tip := tips[(w.tipTicks/2400)%len(tips)]
+		w.broadcastAll(proto.MsgSServerMsg, buildServerMsg(tip))
 	}
 
 	// Player vitals, regen, combat cooldown, status effects, and poison.

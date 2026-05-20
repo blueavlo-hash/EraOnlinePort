@@ -35,8 +35,21 @@ func (w *World) handleMove(p *Player, payload []byte) {
 		return
 	}
 
-	// Drunk: 25% chance to stumble in a random direction instead.
-	if hasEffect(p, FXDrunk) && rand.Float64() < 0.25 {
+	// Combat lock: while engaged with a melee NPC within range, 55% chance each
+	// step is blocked. Player must use Flee (F) to properly disengage.
+	if p.InCombat {
+		if npc, ok := w.npcs[p.Target]; ok && !npc.Dead && npc.MapID == p.MapID {
+			if iabs(npc.X-p.X) <= 2 && iabs(npc.Y-p.Y) <= 2 {
+				if rand.Float64() < 0.55 {
+					w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You are in combat! Use Flee to escape."))
+					return
+				}
+			}
+		}
+	}
+
+	// Drunk: 40% chance to stumble in a random direction instead.
+	if hasEffect(p, FXDrunk) && rand.Float64() < 0.40 {
 		dir = uint8(1 + rand.Intn(4))
 	}
 
@@ -179,11 +192,15 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 	}
 
 	minDmg, maxDmg := 1, 5 // default fist
+	atkRange := 1           // default melee range (1 tile)
 	if p.WeaponSlot > 0 {
 		obj := w.gameData.GetObject(p.WeaponSlot)
 		if obj != nil {
 			minDmg = obj.MinHit
 			maxDmg = obj.MaxHit
+			if obj.Range > 0 {
+				atkRange = obj.Range
+			}
 
 			// Gap 21: Archer class requires arrows (item type = ammo/arrow obj_type 87).
 			// WeaponAnim == 3 signals a ranged/bow weapon.
@@ -198,6 +215,12 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 
 	effect := skillEffectMap[skillID] // "" for basic or unknown skill_id
 
+	// Drunk: -20% max damage, -15% min damage (impaired aim and grip).
+	if hasEffect(p, FXDrunk) {
+		minDmg = imax(1, int(float64(minDmg)*0.85))
+		maxDmg = imax(minDmg, int(float64(maxDmg)*0.80))
+	}
+
 	// NPC target.
 	if npc, ok := w.npcs[targetID]; ok {
 		if npc.MapID != p.MapID || npc.Dead {
@@ -205,7 +228,7 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 		}
 		dx := npc.X - p.X
 		dy := npc.Y - p.Y
-		if iabs(dx) > 2 || iabs(dy) > 2 {
+		if iabs(dx) > atkRange || iabs(dy) > atkRange {
 			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You are too far away!"))
 			return
 		}
@@ -257,7 +280,7 @@ func (w *World) handleAttack(p *Player, payload []byte) {
 
 		dx := target.X - p.X
 		dy := target.Y - p.Y
-		if iabs(dx) > 2 || iabs(dy) > 2 {
+		if iabs(dx) > atkRange || iabs(dy) > atkRange {
 			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You are too far away!"))
 			return
 		}
@@ -373,6 +396,81 @@ func (w *World) handleFlee(p *Player) {
 	}
 }
 
+// handleUnstuck teleports the player to the nearest walkable tile on their current map.
+// Rate-limited to 3 uses per minute via the world tick.
+func (w *World) handleUnstuck(p *Player) {
+	// Simple spiral search outward from current position.
+	m := w.gameData.GetMap(p.MapID)
+	if m == nil {
+		return
+	}
+	for radius := 0; radius <= 10; radius++ {
+		for dy := -radius; dy <= radius; dy++ {
+			for dx := -radius; dx <= radius; dx++ {
+				if abs(dx) != radius && abs(dy) != radius {
+					continue // only check the perimeter of each radius
+				}
+				nx, ny := p.X+dx, p.Y+dy
+				if nx < 1 || nx > 100 || ny < 1 || ny > 100 {
+					continue
+				}
+				if w.isTileWalkable(p.MapID, nx, ny) {
+					// Teleport in place (same map, new tile).
+					w.broadcastMap(p.MapID, proto.MsgSRemoveChar, buildRemoveChar(p.InstanceID), p.InstanceID)
+					p.X = nx
+					p.Y = ny
+					wr := proto.NewWriter(8)
+					wr.WriteI32(int32(p.MapID))
+					wr.WriteI16(int16(nx))
+					wr.WriteI16(int16(ny))
+					w.sendTo(p, proto.MsgSMapChange, wr.Bytes())
+					w.broadcastMap(p.MapID, proto.MsgSSetChar, p.BuildSetChar(), p.InstanceID)
+					for _, other := range w.players {
+						if other.InstanceID != p.InstanceID && other.MapID == p.MapID {
+							w.sendTo(p, proto.MsgSSetChar, other.BuildSetChar())
+						}
+					}
+					for _, npc := range w.npcs {
+						if npc.MapID == p.MapID && !npc.Dead {
+							w.sendTo(p, proto.MsgSSetChar, npc.BuildSetChar())
+						}
+					}
+					return
+				}
+			}
+		}
+	}
+	// Nothing found nearby — send to spawn map.
+	w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("Teleporting to spawn..."))
+	w.broadcastMap(p.MapID, proto.MsgSRemoveChar, buildRemoveChar(p.InstanceID), p.InstanceID)
+	p.MapID = w.cfg.SpawnMap
+	p.X = w.cfg.SpawnX
+	p.Y = w.cfg.SpawnY
+	wr2 := proto.NewWriter(8)
+	wr2.WriteI32(int32(p.MapID))
+	wr2.WriteI16(int16(p.X))
+	wr2.WriteI16(int16(p.Y))
+	w.sendTo(p, proto.MsgSMapChange, wr2.Bytes())
+	w.broadcastMap(p.MapID, proto.MsgSSetChar, p.BuildSetChar(), p.InstanceID)
+	for _, other := range w.players {
+		if other.InstanceID != p.InstanceID && other.MapID == p.MapID {
+			w.sendTo(p, proto.MsgSSetChar, other.BuildSetChar())
+		}
+	}
+	for _, npc := range w.npcs {
+		if npc.MapID == p.MapID && !npc.Dead {
+			w.sendTo(p, proto.MsgSSetChar, npc.BuildSetChar())
+		}
+	}
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // sendCombatState sends MsgSCombatState to a player.
 func (w *World) sendCombatState(p *Player) {
 	inCombat := uint8(0)
@@ -463,6 +561,8 @@ func (w *World) npcDied(killer *Player, npc *NPC) {
 	if npc.Def.DeathObj > 0 {
 		w.spawnGroundItemWithRarity(npc.MapID, npc.X, npc.Y, npc.Def.DeathObj, 1)
 	}
+	// Chance for a bonus pre-enchanted weapon/armor drop.
+	w.npcDropEnchantedLoot(npc.MapID, npc.X, npc.Y)
 	if npc.Def.Gold > 0 {
 		gold := npc.Def.Gold/2 + randN(npc.Def.Gold/2+1)
 		killer.Gold += gold
@@ -530,6 +630,75 @@ func (w *World) spawnGroundItemWithRarity(mapID, x, y, objIndex, amount int) {
 	wr.WriteI16(int16(x))
 	wr.WriteI16(int16(y))
 	w.broadcastMap(mapID, proto.MsgSRareDropNotify, wr.Bytes(), -1)
+}
+
+// ---------------------------------------------------------------------------
+// Enchanted NPC drops
+// ---------------------------------------------------------------------------
+
+// npcDropEnchantedLoot gives a 25% chance (non-common rarity) to drop a random
+// weapon or armor with a pre-applied enchant matching the rarity tier.
+func (w *World) npcDropEnchantedLoot(mapID, x, y int) {
+	rarity := rollLootRarity()
+	if rarity == 0 {
+		return
+	}
+	objIndex := w.pickEnchantableItem()
+	if objIndex == 0 {
+		return
+	}
+	id := w.allocGroundID()
+	// Offset Y by 1 so the enchanted drop doesn't stack on top of the normal loot.
+	dy := y + 1
+	gi := &GroundItem{
+		ID:       id,
+		MapID:    mapID,
+		X:        x,
+		Y:        dy,
+		ObjIndex: objIndex,
+		Amount:   1,
+		Enchant:  rarity,
+		Timeout:  720, // 3 minutes at 4 ticks/sec
+	}
+	w.groundItems[id] = gi
+
+	wr := proto.NewWriter(12)
+	wr.WriteI16(id)
+	wr.WriteI16(int16(objIndex))
+	wr.WriteU16(1)
+	wr.WriteI16(int16(x))
+	wr.WriteI16(int16(dy))
+	w.broadcastMap(mapID, proto.MsgSGroundItemAdd, wr.Bytes(), -1)
+
+	obj := w.gameData.GetObject(objIndex)
+	name := "an item"
+	if obj != nil {
+		name = obj.Name
+	}
+	rwr := proto.NewWriter(32)
+	rwr.WriteStr(name + rarityLabel(rarity))
+	rwr.WriteU8(uint8(rarity))
+	rwr.WriteI16(int16(x))
+	rwr.WriteI16(int16(dy))
+	w.broadcastMap(mapID, proto.MsgSRareDropNotify, rwr.Bytes(), -1)
+}
+
+// pickEnchantableItem returns a random pickable weapon or armor ObjIndex.
+// Returns 0 if the game data has no qualifying items.
+func (w *World) pickEnchantableItem() int {
+	var candidates []int
+	for _, obj := range w.gameData.Objects {
+		if !obj.Pickable {
+			continue
+		}
+		if obj.MinHit > 0 || (obj.ClothingType > 0 && obj.Defense > 0) {
+			candidates = append(candidates, obj.Index)
+		}
+	}
+	if len(candidates) == 0 {
+		return 0
+	}
+	return candidates[rand.Intn(len(candidates))]
 }
 
 // ---------------------------------------------------------------------------
@@ -640,7 +809,13 @@ func (w *World) handlePickup(p *Player, payload []byte) {
 		return
 	}
 
-	if !w.giveItem(p, gi.ObjIndex, gi.Amount) {
+	var given bool
+	if gi.Enchant > 0 {
+		given = w.giveEnchantedItem(p, gi.ObjIndex, gi.Amount, gi.Enchant)
+	} else {
+		given = w.giveItem(p, gi.ObjIndex, gi.Amount)
+	}
+	if !given {
 		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("Inventory full."))
 		return
 	}
@@ -795,6 +970,9 @@ var foodRestore = map[int][2]int{ // [hunger, thirst]
 	317: {0, 0},   // 20kg fish (raw — no nutrition, poisons you)
 }
 
+// goldSackObjIndex is the test-merchant item that gives 1000 gold on use.
+const goldSackObjIndex = 326
+
 func (w *World) handleUseItem(p *Player, payload []byte) {
 	r := proto.NewReader(payload)
 	slot, _ := r.ReadU8()
@@ -804,6 +982,19 @@ func (w *World) handleUseItem(p *Player, payload []byte) {
 	inv := p.Inventory[slot]
 	obj := w.gameData.GetObject(inv.ObjIndex)
 	if obj == nil {
+		return
+	}
+
+	// Gold Sack: testing item, immediately converts to 1000 gold.
+	if inv.ObjIndex == goldSackObjIndex {
+		inv.Amount--
+		if inv.Amount <= 0 {
+			p.Inventory[slot] = nil
+		}
+		p.Gold += 1000
+		w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
+		w.sendTo(p, proto.MsgSStats, p.BuildStats())
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You received 1000 gold!"))
 		return
 	}
 
