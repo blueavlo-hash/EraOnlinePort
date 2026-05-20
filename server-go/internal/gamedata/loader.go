@@ -276,6 +276,7 @@ type objectExport struct {
 	ClothingType int    `json:"clothing_type"`
 	WeaponAnim   int    `json:"weapon_anim"`
 	ShieldAnim   int    `json:"shield_anim"`
+	Range        int    `json:"range"`
 }
 
 func loadObjects(path string) ([]ObjectData, error) {
@@ -289,6 +290,22 @@ func loadObjects(path string) ([]ObjectData, error) {
 		index, err := strconv.Atoi(key)
 		if err != nil {
 			continue
+		}
+		r := entry.Range
+		// Default range by weapon type. Explicit "range" in JSON overrides.
+		// Bows/crossbows -> 5, staves -> 4, wands -> 3, all other weapons -> 1.
+		if r == 0 && entry.MinHit > 0 {
+			nameLower := strings.ToLower(entry.Name)
+			switch {
+			case strings.Contains(nameLower, "bow") || strings.Contains(nameLower, "crossbow"):
+				r = 5
+			case entry.WeaponAnim == 6 || entry.WeaponAnim == 10:
+				r = 4 // staff/spear
+			case strings.Contains(nameLower, "wand"):
+				r = 3
+			default:
+				r = 1 // melee
+			}
 		}
 		objects = append(objects, ObjectData{
 			Index:        index,
@@ -306,6 +323,7 @@ func loadObjects(path string) ([]ObjectData, error) {
 			WeaponAnim:   entry.WeaponAnim,
 			ShieldAnim:   entry.ShieldAnim,
 			ClothingType: entry.ClothingType,
+			Range:        r,
 		})
 	}
 	return objects, nil

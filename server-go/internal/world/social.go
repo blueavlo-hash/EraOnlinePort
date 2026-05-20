@@ -24,6 +24,12 @@ func signKey(mapID, x, y int) string {
 	return fmt.Sprintf("%d:%d:%d", mapID, x, y)
 }
 
+// chalkObjIndex is the inventory item required to place a sign.
+const chalkObjIndex = 324
+
+// npcTypeBountyBoard is the NPCType value used for bounty board NPCs.
+const npcTypeBountyBoard = 5
+
 // handlePlaceSign places a sign at the player's current position.
 func (w *World) handlePlaceSign(p *Player, payload []byte) {
 	r := proto.NewReader(payload)
@@ -34,6 +40,23 @@ func (w *World) handlePlaceSign(p *Player, payload []byte) {
 	if len(text) > 120 {
 		text = text[:120]
 	}
+	// Chalk is required to leave a sign or graffiti.
+	chalkSlot := -1
+	for i, slot := range p.Inventory {
+		if slot != nil && slot.ObjIndex == chalkObjIndex {
+			chalkSlot = i
+			break
+		}
+	}
+	if chalkSlot < 0 {
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You need Chalk to place a sign. Buy some from a merchant."))
+		return
+	}
+	p.Inventory[chalkSlot].Amount--
+	if p.Inventory[chalkSlot].Amount <= 0 {
+		p.Inventory[chalkSlot] = nil
+	}
+	w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
 	key := signKey(p.MapID, p.X, p.Y)
 	if _, exists := w.signs[key]; exists {
 		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("There is already a sign here."))
@@ -298,7 +321,24 @@ func (w *World) handlePickpocket(p *Player, payload []byte) {
 // Bounty board
 // ---------------------------------------------------------------------------
 
+// nearBountyBoard returns true if the player is within 3 tiles of a bounty board NPC.
+func (w *World) nearBountyBoard(p *Player) bool {
+	for _, npc := range w.npcs {
+		if npc.MapID != p.MapID || npc.Dead || npc.Def.NPCType != npcTypeBountyBoard {
+			continue
+		}
+		if iabs(npc.X-p.X) <= 3 && iabs(npc.Y-p.Y) <= 3 {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *World) handleBountyPost(p *Player, payload []byte) {
+	if !w.nearBountyBoard(p) {
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You must be near a Bounty Board to post a bounty."))
+		return
+	}
 	r := proto.NewReader(payload)
 	targetName, err := r.ReadStr()
 	if err != nil {
@@ -334,6 +374,10 @@ func (w *World) handleBountyPost(p *Player, payload []byte) {
 }
 
 func (w *World) handleBountyList(p *Player) {
+	if !w.nearBountyBoard(p) {
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You must be near a Bounty Board to view bounties."))
+		return
+	}
 	// Collect all players with active bounties.
 	type entry struct {
 		name   string

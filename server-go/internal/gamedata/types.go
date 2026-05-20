@@ -116,6 +116,7 @@ type ObjectData struct {
 	ClothingType int    `json:"clothing_type"`
 	Stackable    bool   `json:"stackable"`
 	Weight       int    `json:"weight"`
+	Range        int    `json:"range"` // attack range in tiles; 0 or 1 = melee (1 tile), >1 = ranged
 }
 
 // SpellData holds one spell definition.

@@ -303,6 +303,17 @@ func (w *World) broadcastTradeState(pidA, pidB int32) {
 	}
 }
 
+// giveEnchantedItem adds a pre-enchanted item to inventory (no stacking — unique enchants).
+func (w *World) giveEnchantedItem(p *Player, objIndex, amount, enchant int) bool {
+	for i, slot := range p.Inventory {
+		if slot == nil || slot.ObjIndex == 0 {
+			p.Inventory[i] = &db.InventorySlot{Slot: i, ObjIndex: objIndex, Amount: amount, Enchant: enchant}
+			return true
+		}
+	}
+	return false
+}
+
 // giveItem adds an item to a player's inventory, stacking if possible.
 func (w *World) giveItem(p *Player, objIndex, amount int) bool {
 	// Try to stack.
