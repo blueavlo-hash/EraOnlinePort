@@ -42,7 +42,7 @@ type levelGain struct {
 }
 
 var classLevelGains = map[int]levelGain{
-	ClassWarrior:  {15, 0, 12, 1},  // +1 STR
+	ClassWarrior:  {15, 2, 12, 1},  // +1 STR, +2 MP/level (enough for skills at high level)
 	ClassMage:     {5, 8, 7, 3},    // +1 INT
 	ClassRogue:    {8, 4, 10, 2},   // +1 AGI
 	ClassArcher:   {8, 6, 8, 2},    // +1 AGI
@@ -96,22 +96,10 @@ func resolveAttack(atkMinDmg, atkMaxDmg, atkAGI, atkLevel, defDef, defLevel int)
 	return dmg, false
 }
 
-// xpForKill returns XP awarded for killing an NPC.
-func xpForKill(npcLevel, npcType int) int {
-	base := npcLevel * 15
-	switch npcType {
-	case 2: // boss
-		base *= 5
-	case 3: // elite
-		base *= 2
-	}
-	return base
-}
-
 // xpToNextLevel returns XP required to reach the next level.
-// Formula: 1500 * 1.35^(level-1)
+// Formula: 1500 * 1.25^(level-1) — gentler curve for a level-50 cap.
 func xpToNextLevel(level int) int {
-	return int(1500.0 * math.Pow(1.35, float64(level-1)))
+	return int(1500.0 * math.Pow(1.25, float64(level-1)))
 }
 
 // recalcCombatStats recomputes a player's derived combat stats using fixed

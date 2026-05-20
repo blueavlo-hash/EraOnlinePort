@@ -85,6 +85,7 @@ type NPCData struct {
 	Attackable bool   `json:"attackable"`
 	Tameable   bool   `json:"tameable"`
 	DeathObj   int    `json:"death_obj"`
+	LootChance float64 `json:"loot_chance"` // 0 = always drop (if DeathObj>0); 0.0<x<=1.0 = drop probability
 	Gold       int    `json:"gold"`
 	MinHP      int    `json:"min_hp"`
 	MaxHP      int    `json:"max_hp"`
@@ -116,7 +117,8 @@ type ObjectData struct {
 	ClothingType int    `json:"clothing_type"`
 	Stackable    bool   `json:"stackable"`
 	Weight       int    `json:"weight"`
-	Range        int    `json:"range"` // attack range in tiles; 0 or 1 = melee (1 tile), >1 = ranged
+	HealHP       int    `json:"heal_hp"` // HP restored when used (bandages, potions)
+	Range        int    `json:"range"`   // attack range in tiles; 0 or 1 = melee (1 tile), >1 = ranged
 }
 
 // SpellData holds one spell definition.

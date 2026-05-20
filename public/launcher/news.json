@@ -1,6 +1,11 @@
 [
     {
         "date": "MAY 2026",
+        "title": "v0.5.32-alpha — Balance Pass, Beginner Zones & Survival Rework",
+        "body": "Major balance update across the entire game. XP curve flattened for a more comfortable level 1–50 grind. Mage overhaul: Inner Flame cost cut in half, Arcane Bolt buffed into a proper tier-2 spell, Frost Nova now deals real damage, and a new Static Shock spell fills the quick-cast role. All 4 bows now deal damage (Archers were previously unplayable). Warriors now gain MP per level. Hunger and thirst drain roughly twice as fast — food and water actually matter now — and starvation hits 3 HP every 20 seconds. Bandages can now be used to restore HP. New beginner zones south and west of the starting city (maps 51, 32, 47) with giant snakes and bandits scaled for new players. Dragon XP quintupled. Drop tables added to Necromancers, Cyclops, Minotaurs, and Dragons. New players now receive a guided welcome message when first entering the world. Dozens of item data fixes: food restore values corrected, weapon level caps capped at 45, Gold Coin reclassified, stale VB6 fields removed."
+    },
+    {
+        "date": "MAY 2026",
         "title": "v0.5.31-alpha — Unstuck Key, Starter Gear & New Spawn",
         "body": "Press F1 at any time to teleport to the nearest walkable tile when stuck. Each class now starts with an appropriate weapon: Warriors get a Sword, Mages a Staff, Rogues a Dagger, Archers keep their Hunter's Bow. Starting skills have been rebalanced — core class skills now start high enough to feel meaningful from level 1. New characters now spawn in the center of Map 81, which is now populated with all essential merchants: healer, blacksmith, tailor, merchant, baker, alchemist, innkeeper, banker, trainer, priest, and all guild masters."
     },

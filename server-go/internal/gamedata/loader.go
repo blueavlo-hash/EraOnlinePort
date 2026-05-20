@@ -196,6 +196,7 @@ type npcExport struct {
 	Attackable int             `json:"attackable"`
 	Tameable   int             `json:"tameable"`
 	DeathObj   int             `json:"death_obj"`
+	LootChance float64         `json:"loot_chance"`
 	GiveGold   int             `json:"give_gld"`
 	MinHP      int             `json:"min_hp"`
 	MaxHP      int             `json:"max_hp"`
@@ -237,6 +238,7 @@ func loadNPCs(path string) ([]NPCData, error) {
 			Attackable: entry.Attackable != 0,
 			Tameable:   entry.Tameable != 0,
 			DeathObj:   entry.DeathObj,
+			LootChance: entry.LootChance,
 			Gold:       entry.GiveGold,
 			MinHP:      entry.MinHP,
 			MaxHP:      entry.MaxHP,
@@ -272,6 +274,7 @@ type objectExport struct {
 	Level        int    `json:"level"`
 	MinHit       int    `json:"min_hit"`
 	MaxHit       int    `json:"max_hit"`
+	MinHP        int    `json:"min_hp"` // HP restored when used (bandages/potions)
 	Defense      int    `json:"def"`
 	ClothingType int    `json:"clothing_type"`
 	WeaponAnim   int    `json:"weapon_anim"`
@@ -319,6 +322,7 @@ func loadObjects(path string) ([]ObjectData, error) {
 			Pickable:     entry.Pickable != 0,
 			Sellable:     entry.Sellable != 0,
 			Food:         entry.Food,
+			HealHP:       entry.MinHP,
 			Level:        entry.Level,
 			WeaponAnim:   entry.WeaponAnim,
 			ShieldAnim:   entry.ShieldAnim,

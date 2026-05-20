@@ -118,12 +118,16 @@ func (db *DB) ListChars(ctx context.Context, accountID int64) ([]CharSummary, er
 	return chars, rows.Err()
 }
 
-// Class ID constants — 0-indexed to match the client (Warrior=0, Mage=1, Rogue=2, Archer=3).
+// Class ID constants — 0-indexed to match the client.
 const (
-	dbClassWarrior = 0
-	dbClassMage    = 1
-	dbClassRogue   = 2
-	dbClassArcher  = 3
+	dbClassWarrior  = 0
+	dbClassMage     = 1
+	dbClassRogue    = 2
+	dbClassArcher   = 3
+	dbClassBard     = 4
+	dbClassDruid    = 5
+	dbClassPaladin  = 6
+	dbClassAssassin = 7
 )
 
 // startItem is one item given to a newly created character.
@@ -138,18 +142,26 @@ type startItem struct {
 type startStats struct{ hp, mp, sta int }
 
 var classStartStats = map[int]startStats{
-	dbClassWarrior: {150, 30, 150},
-	dbClassMage:    {80, 120, 100},
-	dbClassRogue:   {100, 60, 120},
-	dbClassArcher:  {100, 80, 110},
+	dbClassWarrior:  {150, 30, 150},
+	dbClassMage:     {80, 120, 100},
+	dbClassRogue:    {100, 60, 120},
+	dbClassArcher:   {100, 80, 110},
+	dbClassBard:     {85, 80, 70},
+	dbClassDruid:    {95, 90, 75},
+	dbClassPaladin:  {110, 60, 75},
+	dbClassAssassin: {85, 50, 85},
 }
 
 // classStartWeapon maps each class to the obj_index of its starting weapon (0 = none).
 var classStartWeapon = map[int]int{
-	dbClassWarrior: 3,  // Sword
-	dbClassMage:    61, // Staff
-	dbClassRogue:   32, // Dagger
-	dbClassArcher:  23, // Hunter's Bow
+	dbClassWarrior:  3,  // Sword
+	dbClassMage:     61, // Staff
+	dbClassRogue:    32, // Dagger
+	dbClassArcher:   23, // Hunter's Bow
+	dbClassBard:     39, // Harp (instrument, obj_type=2, usable as weapon)
+	dbClassDruid:    61, // Staff (shared with Mage; nature caster)
+	dbClassPaladin:  51, // Iron Mace (holy warrior's blunt weapon)
+	dbClassAssassin: 32, // Dagger
 }
 
 // classStartItems defines per-class starting inventory.
@@ -164,8 +176,20 @@ var classStartItems = map[int][]startItem{
 		{ObjIndex: 32, Amount: 1, Equipped: true},  // Dagger
 	},
 	dbClassArcher: {
-		{ObjIndex: 23, Amount: 1, Equipped: true},   // Hunter's Bow
-		{ObjIndex: 87, Amount: 50, Equipped: false},  // Pile of Arrows
+		{ObjIndex: 23, Amount: 1, Equipped: true},  // Hunter's Bow
+		{ObjIndex: 87, Amount: 50, Equipped: false}, // Pile of Arrows
+	},
+	dbClassBard: {
+		{ObjIndex: 39, Amount: 1, Equipped: true},  // Harp
+	},
+	dbClassDruid: {
+		{ObjIndex: 61, Amount: 1, Equipped: true},  // Staff
+	},
+	dbClassPaladin: {
+		{ObjIndex: 51, Amount: 1, Equipped: true},  // Iron Mace
+	},
+	dbClassAssassin: {
+		{ObjIndex: 32, Amount: 1, Equipped: true},  // Dagger
 	},
 }
 

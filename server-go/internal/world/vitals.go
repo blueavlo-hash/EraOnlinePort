@@ -11,10 +11,10 @@ import (
 const (
 	// Gap 6: original decay was 0.139 hunger / 0.093 thirst per 5-second regen
 	// interval (20 ticks at 4 TPS = 250ms tick).
-	HungerDecayPerTick    = 0.00695 // 0.139 / 20 ticks
-	ThirstDecayPerTick    = 0.00465 // 0.093 / 20 ticks
-	StarvationDmgInterval = 140     // Gap 8: 35 seconds = 140 ticks at 4 TPS (not 240)
-	StarvationDmgAmt      = 1       // HP lost per starvation interval
+	HungerDecayPerTick    = 0.01400 // ~28 min to fully deplete (survival pressure)
+	ThirstDecayPerTick    = 0.00930 // ~27 min to fully deplete (thirst kills faster)
+	StarvationDmgInterval = 80      // ~20 seconds between starvation ticks (was 35s)
+	StarvationDmgAmt      = 3       // HP lost per starvation interval (was 1)
 
 	PoisonTickDmg    = 1
 	PoisonDurationMs = 60000 // 60s

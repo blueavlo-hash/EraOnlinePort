@@ -497,6 +497,20 @@ func (w *World) handleJoin(connID uint64, info *JoinInfo) {
 
 	// Daily login streak.
 	w.checkDailyLogin(p)
+
+	// Onboarding messages for new characters (level 1 entering for the first time).
+	if p.Level == 1 {
+		welcomeMsgs := []string{
+			"Welcome to Era Online! You are " + p.CharName + ".",
+			"Controls: Arrow keys or WASD to move. Click to attack. Press C for character stats, I for inventory.",
+			"Survival: Keep your hunger and thirst above 0 or you will starve. Eat food and drink water you find.",
+			"Tip: Press F1 if you ever get stuck on a tile.",
+			"Explore the world and slay enemies to gain experience and level up. Good luck!",
+		}
+		for _, msg := range welcomeMsgs {
+			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(msg))
+		}
+	}
 }
 
 // handleLeave removes a player from the world and persists their state.

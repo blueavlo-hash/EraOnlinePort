@@ -558,8 +558,12 @@ func (w *World) npcDied(killer *Player, npc *NPC) {
 	w.broadcastMap(npc.MapID, proto.MsgSRemoveChar, buildRemoveChar(npc.InstanceID), -1)
 
 	// Drop items with rarity roll.
+	// LootChance==0 means always drop (backward-compatible); 0<x<=1 is a probability.
 	if npc.Def.DeathObj > 0 {
-		w.spawnGroundItemWithRarity(npc.MapID, npc.X, npc.Y, npc.Def.DeathObj, 1)
+		chance := npc.Def.LootChance
+		if chance <= 0 || randSource.Float64() < chance {
+			w.spawnGroundItemWithRarity(npc.MapID, npc.X, npc.Y, npc.Def.DeathObj, 1)
+		}
 	}
 	// Chance for a bonus pre-enchanted weapon/armor drop.
 	w.npcDropEnchantedLoot(npc.MapID, npc.X, npc.Y)
@@ -995,6 +999,27 @@ func (w *World) handleUseItem(p *Player, payload []byte) {
 		w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
 		w.sendTo(p, proto.MsgSStats, p.BuildStats())
 		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You received 1000 gold!"))
+		return
+	}
+
+	// Bandages / healing items (HealHP > 0, e.g. obj_type 45).
+	if obj.HealHP > 0 && obj.Food <= 0 {
+		if p.HP >= p.MaxHP {
+			w.sendTo(p, proto.MsgSServerMsg, buildServerMsg("You are already at full health."))
+			return
+		}
+		p.HP = imin(p.HP+obj.HealHP, p.MaxHP)
+		inv.Amount--
+		if inv.Amount <= 0 {
+			p.Inventory[slot] = nil
+		}
+		w.sendTo(p, proto.MsgSInventory, p.BuildInventory())
+		hrw := proto.NewWriter(6)
+		hrw.WriteI16(int16(p.HP))
+		hrw.WriteI16(int16(p.MP))
+		hrw.WriteI16(int16(p.Stamina))
+		w.sendTo(p, proto.MsgSHealth, hrw.Bytes())
+		w.sendTo(p, proto.MsgSServerMsg, buildServerMsg(fmt.Sprintf("You bandage your wounds and restore %d HP.", obj.HealHP)))
 		return
 	}
 
