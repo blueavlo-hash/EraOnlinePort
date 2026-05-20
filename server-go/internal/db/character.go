@@ -118,12 +118,12 @@ func (db *DB) ListChars(ctx context.Context, accountID int64) ([]CharSummary, er
 	return chars, rows.Err()
 }
 
-// Class ID constants (used for starting equipment; duplicated to avoid import cycle).
+// Class ID constants — 0-indexed to match the client (Warrior=0, Mage=1, Rogue=2, Archer=3).
 const (
-	dbClassWarrior = 1
-	dbClassMage    = 2
-	dbClassRogue   = 3
-	dbClassArcher  = 4
+	dbClassWarrior = 0
+	dbClassMage    = 1
+	dbClassRogue   = 2
+	dbClassArcher  = 3
 )
 
 // startItem is one item given to a newly created character.

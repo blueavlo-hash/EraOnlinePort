@@ -5,16 +5,16 @@ import (
 	"math/rand"
 )
 
-// Class IDs
+// Class IDs — 0-indexed to match the client (Warrior=0, Mage=1, Rogue=2, Archer=3).
 const (
-	ClassWarrior  = 1
-	ClassMage     = 2
-	ClassRogue    = 3
-	ClassArcher   = 4
-	ClassBard     = 5
-	ClassDruid    = 6
-	ClassPaladin  = 7
-	ClassAssassin = 8
+	ClassWarrior  = 0
+	ClassMage     = 1
+	ClassRogue    = 2
+	ClassArcher   = 3
+	ClassBard     = 4
+	ClassDruid    = 5
+	ClassPaladin  = 6
+	ClassAssassin = 7
 )
 
 // statBlock holds derived base stats for a class at level 1.
